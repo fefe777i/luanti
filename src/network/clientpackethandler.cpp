@@ -1232,6 +1232,7 @@ void Client::handleCommand_HudAdd(NetworkPacket* pkt)
 	event->hudadd->text2     = text2;
 	event->hudadd->style     = style;
 	event->hudadd->hideable  = flags % 2;
+	event->hudadd->touchable = (flags >> 1) & 1;
 	m_client_event_queue.push(event);
 }
 

@@ -695,6 +695,7 @@ TileDef read_tiledef(lua_State *L, int index, u8 drawtype, bool special)
 			if (align_style == "user")
 				tiledef.align_style = ALIGN_STYLE_USER_DEFINED;
 			else if (align_style == "world")
+
 				tiledef.align_style = ALIGN_STYLE_WORLD;
 			else
 				tiledef.align_style = ALIGN_STYLE_NODE;
@@ -2422,7 +2423,7 @@ void read_hud_element(lua_State *L, HudElement *elem)
 	elem->style = getintfield_default(L, 2, "style", 0);
 
 	elem->hideable = getboolfield_default(L, 2, "hideable", true);
-
+	elem->touchable = getboolfield_default(L, 2, "touchable", false);
 	/* check for known deprecated element usage */
 	if ((elem->type  == HUD_ELEM_STATBAR) && (elem->size == v2f()))
 		log_deprecated(L,"Deprecated usage of statbar without size!");
@@ -2491,6 +2492,9 @@ void push_hud_element(lua_State *L, HudElement *elem)
 
 	lua_pushboolean(L, elem->hideable);
 	lua_setfield(L, -2, "hideable");
+
+	lua_pushboolean(L, elem->touchable);
+	lua_setfield(L, -2, "touchable");
 }
 
 bool read_hud_change(lua_State *L, HudElementStat &stat, HudElement *elem, void **value)

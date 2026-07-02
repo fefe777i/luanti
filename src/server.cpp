@@ -1886,8 +1886,9 @@ void Server::SendHUDAdd(session_t peer_id, u32 id, HudElement *form)
 		pkt << v2s32::from(form->size);
 
 	/// Bit 0: hideable
-	/// Bits 1 ... 8: unused (set to 0)
-	u8 flags = form->hideable ? 1 : 0;
+	/// Bit 1: touchable
+	/// Bits 2 ... 8: unused (set to 0)
+	u8 flags = (form->hideable ? 1 : 0) | (form->touchable ? 2 : 0);
 
 	pkt << form->z_index << form->text2 << form->style << flags;
 
