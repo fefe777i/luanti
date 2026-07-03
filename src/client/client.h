@@ -231,6 +231,7 @@ public:
 	void sendChangePassword(const std::string &oldpassword,
 		const std::string &newpassword);
 	void sendDamage(u16 damage);
+	void sendHudTouch(const std::string &hud_element_name);
 	void sendRespawnLegacy();
 	void sendReady();
 	void sendHaveMedia(const std::vector<u32> &tokens);

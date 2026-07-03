@@ -1418,6 +1418,12 @@ void Game::processUserInput(f32 dtime)
 
 	processKeyInput();
 	processItemSelection(&runData.new_playeritem);
+
+	if (g_touchcontrols) {
+		std::optional<std::string> touched = g_touchcontrols->getTouchedHudElement();
+		if (touched)
+			client->sendHudTouch(*touched);
+	}
 }
 
 

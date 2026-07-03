@@ -917,7 +917,14 @@ enum ToServerCommand : u16
 		v2f32 max_fs_info
 	*/
 
-	TOSERVER_NUM_MSG_TYPES = 0x54,
+	TOSERVER_HUD_TOUCH = 0x54,
+	/*
+		std::string hud_element_name
+		-- Sent when the player taps a touchable HUD element on a
+		-- touchscreen client.
+	*/
+
+	TOSERVER_NUM_MSG_TYPES = 0x55,
 };
 
 enum AuthMechanism

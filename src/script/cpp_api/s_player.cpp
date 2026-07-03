@@ -220,6 +220,21 @@ void ScriptApiPlayer::on_playerReceiveFields(ServerActiveObject *player,
 	runCallbacks(3, RUN_CALLBACKS_MODE_OR_SC);
 }
 
+void ScriptApiPlayer::on_playerHudTouch(ServerActiveObject *player,
+		const std::string &hud_element_name)
+{
+	SCRIPTAPI_PRECHECKHEADER
+
+	// Get core.registered_on_hud_touch
+	lua_getglobal(L, "core");
+	lua_getfield(L, -1, "registered_on_hud_touch");
+	// param 1
+	objectrefGetOrCreate(L, player);
+	// param 2
+	lua_pushstring(L, hud_element_name.c_str());
+	runCallbacks(2, RUN_CALLBACKS_MODE_OR_SC);
+}
+
 void ScriptApiPlayer::on_authplayer(const std::string &name, const std::string &ip, bool is_success)
 {
 	SCRIPTAPI_PRECHECKHEADER

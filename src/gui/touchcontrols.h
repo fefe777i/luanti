@@ -114,6 +114,10 @@ public:
 	void registerHotbarRect(u16 index, const recti &rect);
 	std::optional<u16> getHotbarSelection();
 
+	void resetTouchableHudRects();
+	void registerTouchableHudRect(const std::string &name, const recti &rect);
+	std::optional<std::string> getTouchedHudElement();
+
 	bool isStatusTextOverridden() { return m_overflow_open; }
 	IGUIStaticText *getStatusText() { return m_status_text.get(); }
 
@@ -143,6 +147,9 @@ private:
 
 	std::unordered_map<u16, recti> m_hotbar_rects;
 	std::optional<u16> m_hotbar_selection = std::nullopt;
+
+	std::unordered_map<std::string, recti> m_touchable_hud_rects;
+	std::optional<std::string> m_touched_hud_element = std::nullopt;
 
 	// value in degree
 	double m_camera_yaw_change = 0.0;
@@ -221,6 +228,7 @@ private:
 
 	// handle pressing hotbar items
 	bool isHotbarButton(const SEvent &event);
+	bool isTouchableHudButton(const SEvent &event);
 
 	// handle release event
 	void handleReleaseEvent(size_t pointer_id);

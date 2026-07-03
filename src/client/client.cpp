@@ -1434,6 +1434,13 @@ void Client::sendDamage(u16 damage)
 	Send(&pkt);
 }
 
+void Client::sendHudTouch(const std::string &hud_element_name)
+{
+	NetworkPacket pkt(TOSERVER_HUD_TOUCH, 0);
+	pkt << hud_element_name;
+	Send(&pkt);
+}
+
 void Client::sendRespawnLegacy()
 {
 	NetworkPacket pkt(TOSERVER_RESPAWN_LEGACY, 0);
