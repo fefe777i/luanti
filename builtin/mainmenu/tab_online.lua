@@ -5,31 +5,37 @@
 local SERVER_ADDRESS = ""      -- наприклад "123.45.67.89" або "my.server.com"
 local SERVER_PORT    = 30000   -- стандартний порт Luanti/Minetest, зміни якщо треба
 
+local LOGO = core.formspec_escape(defaulttexturedir .. "ws47_logo.png")
+
 local function get_formspec(tabview, name, tabdata)
 	local fs = {
 		ws47_theme.STYLE_PREFIX,
 		"box[0,0;15.5,7.1;", ws47_theme.COLOR_BG, "]",
 
-		"style_type[label;font=bold;font_size=28]",
-		"label[5.1,1.0;", core.formspec_escape("МАСТЕРСКАЯ 47 СЕРВЕР"), "]",
-		"style_type[label;font=normal;font_size=16]",
+		-- Лого по центру, вгорі
+		"image[5.75,0.15;4,2.74;", LOGO, "]",
 
-		"box[5.0,2.0;5.5,2.6;", ws47_theme.COLOR_BG_2, "]",
+		"box[5.0,3.05;5.5,2.9;", ws47_theme.COLOR_BG_2, "]",
 
-		"label[5.3,2.35;", fgettext("Ім'я:"), "]",
-		"field[5.3,2.65;5,0.75;te_name;;",
+		-- Прозорі поля вводу (border=false ховає стандартний фон/рамку)
+		"style_type[field,pwdfield;border=false;textcolor=#ffffff]",
+
+		"label[5.3,3.4;", fgettext("Ім'я:"), "]",
+		"field[5.3,3.7;5,0.75;te_name;;",
 			core.formspec_escape(core.settings:get("name")), "]",
 
-		"label[5.3,3.55;", fgettext("Пароль:"), "]",
-		"pwdfield[5.3,3.85;5,0.75;te_pwd;]",
+		"label[5.3,4.6;", fgettext("Пароль:"), "]",
+		"pwdfield[5.3,4.9;5,0.75;te_pwd;]",
 
-		"button[5.3,4.9;5,0.9;btn_ws47_connect;",
+		"style_type[field,pwdfield;border=true]",
+
+		"button[5.3,5.75;5,0.9;btn_ws47_connect;",
 			fgettext("Зареєструватися або увійти"), "]",
 	}
 
 	if SERVER_ADDRESS == "" then
 		fs[#fs + 1] = "style_type[label;textcolor=#ff6b6b]"
-		fs[#fs + 1] = "label[5.3,6.0;" ..
+		fs[#fs + 1] = "label[5.3,6.8;" ..
 			fgettext("(адреса сервера ще не налаштована)") .. "]"
 	end
 
@@ -65,6 +71,8 @@ end
 local function on_change(type)
 	if type == "ENTER" then
 		mm_game_theme.set_engine()
+		-- гарантовано ховаємо автоматичний header рушія - лого вже є у формі
+		mm_game_theme.clear_single("header")
 	end
 end
 

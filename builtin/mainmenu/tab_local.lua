@@ -402,6 +402,7 @@ local function on_change(type)
 		else
 			mm_game_theme.set_engine()
 		end
+		mm_game_theme.clear_single("header")
 
 		if singleplayer_refresh_gamebar() then
 			ui.find_by_name("game_button_bar"):show()
