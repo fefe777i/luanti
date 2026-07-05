@@ -26,6 +26,7 @@
 #include "item_visuals_manager.h"
 #include "itemdef.h"
 #include "nodedef.h"
+#include "wieldmesh.h"
 #include "mapblock.h"
 #include "mapblock_mesh.h"
 #include "mapnode.h"
