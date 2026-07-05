@@ -67,6 +67,10 @@ private:
 	// get_csm_restrictions()
 	static int l_get_csm_restrictions(lua_State *L);
 
+	static int l_set_ghost_node(lua_State *L);
+	static int l_remove_ghost_node(lua_State *L);
+	static int l_clear_ghost_nodes(lua_State *L);
+
 public:
 	static void Initialize(lua_State *L, int top);
 	static void InitializeSSCSM(lua_State *L, int top);
