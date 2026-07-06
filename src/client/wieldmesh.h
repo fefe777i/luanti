@@ -133,6 +133,12 @@ public:
 
 	scene::IMesh *getMesh() { return m_meshnode->getMesh(); }
 
+	// Overrides the internal child mesh node's scale directly, bypassing
+	// setItem()'s automatic wield-size scaling. Used to display an item's
+	// node mesh at full real-world (in-map) size instead of hand-held size,
+	// e.g. for client-side "ghost node" build previews.
+	void setStaticNodeScale(f32 scale) { m_meshnode->setScale(v3f(scale)); }
+
 	virtual void render();
 
 	virtual const aabb3f &getBoundingBox() const { return m_bounding_box; }

@@ -1459,14 +1459,15 @@ void Client::setGhostNode(v3s16 pos, const std::string &node_name)
 	ItemStack item(node_name, 1, 0, idef());
 	scenenode->setItem(item, this, false);
 
+	// setItem() always shrinks node meshes down to hand-held "wield" size
+	// internally; override that back to full real-world node size here.
+	scenenode->setStaticNodeScale(1.0f);
+
 	// Semi-transparent white tint so the underlying node texture still
 	// shows through, giving the classic "ghost block" preview look.
 	scenenode->setColor(video::SColor(140, 255, 255, 255));
 
 	scenenode->setPosition(intToFloat(pos, BS));
-	// WieldMeshSceneNode is normally scaled down for hand display;
-	// scale it back up to a full in-world node size.
-	scenenode->setScale(v3f(1.5f, 1.5f, 1.5f));
 
 	scenenode->drop(); // the scene manager already grabbed a reference
 
