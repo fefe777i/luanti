@@ -18,7 +18,8 @@ local function get_formspec(tabview, name, tabdata)
 		"box[5.0,3.05;5.5,2.9;", ws47_theme.COLOR_BG_2, "]",
 
 		-- Прозорі поля вводу (border=false ховає стандартний фон/рамку)
-		"style_type[field,pwdfield;border=false;textcolor=#ffffff]",
+		"style_type[field;border=false;textcolor=#ffffff]",
+		"style_type[pwdfield;border=false;textcolor=#ffffff]",
 
 		"label[5.3,3.4;", fgettext("Ім'я:"), "]",
 		"field[5.3,3.7;5,0.75;te_name;;",
@@ -27,7 +28,8 @@ local function get_formspec(tabview, name, tabdata)
 		"label[5.3,4.6;", fgettext("Пароль:"), "]",
 		"pwdfield[5.3,4.9;5,0.75;te_pwd;]",
 
-		"style_type[field,pwdfield;border=true]",
+		"style_type[field;border=true]",
+		"style_type[pwdfield;border=true]",
 
 		"button[5.3,5.75;5,0.9;btn_ws47_connect;",
 			fgettext("Зареєструватися або увійти"), "]",
