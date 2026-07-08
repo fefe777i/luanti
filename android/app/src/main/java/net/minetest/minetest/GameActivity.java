@@ -116,6 +116,9 @@ public class GameActivity extends SDLActivity {
 		AlertDialog alertDialog = builder.create();
 		CustomEditText editText = new CustomEditText(this, editType);
 		container.addView(editText);
+		editText.setBackground(null); // прибрати стандартний зелений/сірий фон Android
+		editText.setTextColor(0xFFFFFFFF); // білий текст, щоб було видно на темному тлі
+		editText.setHintTextColor(0x99FFFFFF);
 		editText.setMaxLines(8);
 		editText.setHint(hint);
 		editText.setText(current);
