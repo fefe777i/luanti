@@ -39,6 +39,42 @@ bool GUIScrollContainer::OnEvent(const SEvent &event)
 		return retval;
 	}
 
+	// Drag-to-scroll: lets a finger (or mouse) drag the container's
+	// content directly, instead of only being able to grab the thin
+	// scrollbar handle. A small movement threshold distinguishes a
+	// drag gesture from a simple tap/click meant for a child element.
+	if (event.EventType == EET_MOUSE_INPUT_EVENT && m_scrollbar &&
+			m_orientation != UNDEFINED) {
+		const s32 DRAG_THRESHOLD_PX = 10;
+		s32 axis_pos = (m_orientation == VERTICAL) ?
+				event.MouseInput.Y : event.MouseInput.X;
+
+		if (event.MouseInput.Event == EMIE_LMOUSE_PRESSED_DOWN) {
+			m_drag_active = false;
+			m_drag_start_pos = axis_pos;
+			m_drag_start_scrollbar_pos = m_scrollbar->getPos();
+		} else if (event.MouseInput.Event == EMIE_LMOUSE_LEFT_UP) {
+			if (m_drag_active) {
+				m_drag_active = false;
+				return true; // swallow the release so it doesn't also click a child
+			}
+		} else if (event.MouseInput.Event == EMIE_MOUSE_MOVED &&
+				event.MouseInput.isLeftPressed()) {
+			s32 delta_px = axis_pos - m_drag_start_pos;
+			s32 abs_delta = delta_px < 0 ? -delta_px : delta_px;
+			if (!m_drag_active && abs_delta > DRAG_THRESHOLD_PX)
+				m_drag_active = true;
+
+			if (m_drag_active) {
+				f32 factor = (m_scrollfactor != 0.0f) ? m_scrollfactor : 1.0f;
+				s32 delta_scroll = (s32)(delta_px / factor);
+				m_scrollbar->setPos(m_drag_start_scrollbar_pos - delta_scroll);
+				updateScrolling();
+				return true;
+			}
+		}
+	}
+
 	return IGUIElement::OnEvent(event);
 }
 

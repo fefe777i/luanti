@@ -198,6 +198,12 @@ protected:
 	gui::IGUIFont *m_font = nullptr;
 	GUIScrollBar *m_scrollbar = nullptr;
 
+	// Touch/mouse drag-to-scroll state (lets a finger drag the list content
+	// directly, instead of only being able to drag the thin scrollbar handle)
+	bool m_drag_active = false;
+	s32 m_drag_start_y = 0;
+	s32 m_drag_start_scrollpos = 0;
+
 	// Allocated strings and images
 	std::vector<core::stringw> m_strings;
 	std::vector<video::ITexture*> m_images;

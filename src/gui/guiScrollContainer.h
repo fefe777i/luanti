@@ -49,4 +49,9 @@ private:
 	f32 m_scrollfactor; //< scrollbar pos * scrollfactor = scroll offset in pixels
 	std::optional<s32> m_content_padding_px; //< in pixels
 
+	// Touch/mouse drag-to-scroll state
+	bool m_drag_active = false;
+	s32 m_drag_start_pos = 0;
+	s32 m_drag_start_scrollbar_pos = 0;
+
 };
