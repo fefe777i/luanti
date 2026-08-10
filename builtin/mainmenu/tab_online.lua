@@ -33,7 +33,7 @@ local function get_formspec(tabview, name, tabdata)
 
 		"button[5.3,5.75;3.2,0.9;btn_ws47_connect;",
 			fgettext("Connect"), "]",
-		"button[8.5,5.75;2,0.9;btn_ws47_skin;"
+		"button[8.5,5.75;2,0.9;btn_ws47_skin;" .. 
 			fgettext("Skin"), "]",
 	}
 
