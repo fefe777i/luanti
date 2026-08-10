@@ -25,11 +25,6 @@ local function get_formspec(data)
 	local sel = data.selected or 1
 	local skin_file = skins[sel] or "character.png"
 	local rel_tex = "skins/" .. skin_file
-	local abs_path = skin_dir .. DIR_DELIM .. skin_file
-
-	if not core.file_exists(abs_path) then
-		rel_tex = "player.png"
-	end
 
 	local list_str = table.concat(skins, ",")
 
