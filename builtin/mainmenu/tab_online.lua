@@ -31,8 +31,10 @@ local function get_formspec(tabview, name, tabdata)
 		"style_type[field;border=true]",
 		"style_type[pwdfield;border=true]",
 
-		"button[5.3,5.75;5,0.9;btn_ws47_connect;",
-			fgettext("Зареєструватися або увійти"), "]",
+		"button[5.3,5.75;3.2,0.9;btn_ws47_connect;",
+			fgettext("Connect"), "]",
+		"button[8.5,5.75;2,0.9;btn_ws47_skin;"
+			fgettext("Skin"), "]",
 	}
 
 	if SERVER_ADDRESS == "" then
@@ -45,6 +47,14 @@ local function get_formspec(tabview, name, tabdata)
 end
 
 local function main_button_handler(tabview, fields, name, tabdata)
+	if fields.btn_ws47_skin then
+		local dlg = create_skin_selector_dlg()
+		dlg:set_parent(tabview)
+		tabview:hide()
+		dlg:show()
+		return true
+	end
+
 	if fields.key_enter_field == "te_pwd" or fields.btn_ws47_connect then
 		if fields.te_name == nil or fields.te_name == "" then
 			gamedata.errormessage = fgettext("Введи ім'я гравця")
