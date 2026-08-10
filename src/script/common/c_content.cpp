@@ -38,6 +38,14 @@ struct EnumString es_TileAnimationType[] =
 	{0, nullptr},
 };
 
+struct EnumString es_AlignStyle[] =
+{
+	{ALIGN_STYLE_NODE, "node"},
+	{ALIGN_STYLE_WORLD, "world"},
+	{ALIGN_STYLE_USER_DEFINED, "user"},
+	{0, nullptr},
+};
+
 struct EnumString es_ItemType[] =
 {
 	{ITEM_NONE, "none"},
@@ -244,6 +252,8 @@ void push_item_definition_full(lua_State *L, const ItemDefinition &i)
 	lua_setfield(L, -2, "wield_scale");
 	lua_pushinteger(L, i.stack_max);
 	lua_setfield(L, -2, "stack_max");
+	lua_pushnumber(L, i.range);
+	lua_setfield(L, -2, "range");
 	lua_pushboolean(L, i.usable);
 	lua_setfield(L, -2, "usable");
 	lua_pushboolean(L, i.liquids_pointable);
@@ -695,7 +705,6 @@ TileDef read_tiledef(lua_State *L, int index, u8 drawtype, bool special)
 			if (align_style == "user")
 				tiledef.align_style = ALIGN_STYLE_USER_DEFINED;
 			else if (align_style == "world")
-
 				tiledef.align_style = ALIGN_STYLE_WORLD;
 			else
 				tiledef.align_style = ALIGN_STYLE_NODE;
@@ -715,6 +724,59 @@ TileDef read_tiledef(lua_State *L, int index, u8 drawtype, bool special)
 	}
 
 	return tiledef;
+}
+
+/******************************************************************************/
+static void push_tile_animation_params(lua_State *L, const TileAnimationParams &anim)
+{
+	lua_newtable(L);
+	lua_pushstring(L, enum_to_string(es_TileAnimationType, anim.type));
+	lua_setfield(L, -2, "type");
+	if (anim.type == TAT_VERTICAL_FRAMES) {
+		lua_pushnumber(L, anim.vertical_frames.aspect_w);
+		lua_setfield(L, -2, "aspect_w");
+		lua_pushnumber(L, anim.vertical_frames.aspect_h);
+		lua_setfield(L, -2, "aspect_h");
+		lua_pushnumber(L, anim.vertical_frames.length);
+		lua_setfield(L, -2, "length");
+	} else if (anim.type == TAT_SHEET_2D) {
+		lua_pushnumber(L, anim.sheet_2d.frames_w);
+		lua_setfield(L, -2, "frames_w");
+		lua_pushnumber(L, anim.sheet_2d.frames_h);
+		lua_setfield(L, -2, "frames_h");
+		lua_pushnumber(L, anim.sheet_2d.frame_length);
+		lua_setfield(L, -2, "frame_length");
+	}
+}
+
+/******************************************************************************/
+void push_tiledef(lua_State *L, const TileDef &def)
+{
+	if (def.name.empty()) {
+		lua_pushnil(L);
+		return;
+	}
+	lua_newtable(L);
+	lua_pushstring(L, def.name.c_str());
+	lua_setfield(L, -2, "name");
+	lua_pushboolean(L, def.backface_culling);
+	lua_setfield(L, -2, "backface_culling");
+	lua_pushboolean(L, def.tileable_horizontal);
+	lua_setfield(L, -2, "tileable_horizontal");
+	lua_pushboolean(L, def.tileable_vertical);
+	lua_setfield(L, -2, "tileable_vertical");
+	if (def.has_color) {
+		push_ARGB8(L, def.color);
+		lua_setfield(L, -2, "color");
+	}
+	lua_pushstring(L, enum_to_string(es_AlignStyle, def.align_style));
+	lua_setfield(L, -2, "align_style");
+	lua_pushnumber(L, def.scale);
+	lua_setfield(L, -2, "scale");
+	if (def.animation.type != TAT_NONE) {
+		push_tile_animation_params(L, def.animation);
+		lua_setfield(L, -2, "animation");
+	}
 }
 
 /******************************************************************************/
@@ -1045,8 +1107,6 @@ void push_content_features(lua_State *L, const ContentFeatures &c)
 	std::string drawtype(enum_to_string(ScriptApiNode::es_DrawType, c.drawtype));
 	std::string liquid_type(enum_to_string(ScriptApiNode::es_LiquidType, c.liquid_type));
 
-	/* Missing "tiles" because I don't see a usecase (at least not yet). */
-
 	lua_newtable(L);
 	lua_pushboolean(L, c.has_on_construct);
 	lua_setfield(L, -2, "has_on_construct");
@@ -1068,6 +1128,19 @@ void push_content_features(lua_State *L, const ContentFeatures &c)
 		lua_pushstring(L, c.mesh.c_str());
 		lua_setfield(L, -2, "mesh");
 	}
+
+	const auto push_tiles = [&](const char *name, const TileDef *tiledefs, size_t count) {
+		lua_createtable(L, count, 0);
+		for (size_t i = 0; i < count; i++) {
+			push_tiledef(L, tiledefs[i]);
+			lua_rawseti(L, -2, i + 1);
+		}
+		lua_setfield(L, -2, name);
+	};
+	push_tiles("tiles", c.tiledef, 6);
+	push_tiles("overlay_tiles", c.tiledef_overlay, 6);
+	push_tiles("special_tiles", c.tiledef_special, CF_SPECIAL_COUNT);
+
 #if CHECK_CLIENT_BUILD()
 	if (c.visuals) {
 		push_ARGB8(L, c.visuals->minimap_color); // I know this is not set-able w/ register_node,
@@ -1078,17 +1151,19 @@ void push_content_features(lua_State *L, const ContentFeatures &c)
 	lua_setfield(L, -2, "visual_scale");
 	lua_pushnumber(L, c.alpha);
 	lua_setfield(L, -2, "alpha");
+	lua_pushstring(L, enum_to_string(ScriptApiNode::es_TextureAlphaMode, c.alpha));
+	lua_setfield(L, -2, "use_texture_alpha");
 	if (!c.palette_name.empty()) {
 		push_ARGB8(L, c.color);
 		lua_setfield(L, -2, "color");
 
 		lua_pushstring(L, c.palette_name.c_str());
-		lua_setfield(L, -2, "palette_name");
+		lua_setfield(L, -2, "palette");
 
 #if CHECK_CLIENT_BUILD()
 		if (c.visuals) {
 			push_palette(L, c.visuals->palette);
-			lua_setfield(L, -2, "palette");
+			lua_setfield(L, -2, "palette_colors");
 		}
 #endif
 	}
@@ -1232,6 +1307,10 @@ void push_nodebox(lua_State *L, const NodeBox &box)
 /******************************************************************************/
 void push_palette(lua_State *L, const std::vector<video::SColor> *palette)
 {
+	if (!palette) {
+		lua_pushnil(L);
+		return;
+	}
 	lua_createtable(L, palette->size(), 0);
 	int newTable = lua_gettop(L);
 	int index = 1;
@@ -2423,4 +2502,266 @@ void read_hud_element(lua_State *L, HudElement *elem)
 	elem->style = getintfield_default(L, 2, "style", 0);
 
 	elem->hideable = getboolfield_default(L, 2, "hideable", true);
-	elem->touchable = getboolfield_default(L, 2, "touchable", false);
+
+	/* check for known deprecated element usage */
+	if ((elem->type  == HUD_ELEM_STATBAR) && (elem->size == v2f()))
+		log_deprecated(L,"Deprecated usage of statbar without size!");
+}
+
+void push_hud_element(lua_State *L, HudElement *elem)
+{
+	lua_newtable(L);
+
+	lua_pushstring(L, enum_to_string(es_HudElementType, elem->type));
+	lua_setfield(L, -2, "type");
+
+	push_v2f(L, elem->pos);
+	lua_setfield(L, -2, "position");
+
+	lua_pushstring(L, elem->name.c_str());
+	lua_setfield(L, -2, "name");
+
+	push_v2f(L, elem->scale);
+	lua_setfield(L, -2, "scale");
+
+	lua_pushstring(L, elem->text.c_str());
+	lua_setfield(L, -2, "text");
+
+	lua_pushnumber(L, elem->number);
+	lua_setfield(L, -2, "number");
+
+	if (elem->type == HUD_ELEM_WAYPOINT) {
+		// Waypoints reuse the item field to store precision,
+		// item = precision + 1 and item = 0 <=> precision = 10 for backwards compatibility.
+		// See `Hud::drawLuaElements`, case `HUD_ELEM_WAYPOINT`.
+		lua_pushnumber(L, (elem->item == 0) ? 10 : (elem->item - 1));
+		lua_setfield(L, -2, "precision");
+	}
+	// push the item field for waypoints as well for backwards compatibility
+	lua_pushnumber(L, elem->item);
+	lua_setfield(L, -2, "item");
+
+	lua_pushnumber(L, elem->dir);
+	lua_setfield(L, -2, "direction");
+
+	push_v2f(L, elem->offset);
+	lua_setfield(L, -2, "offset");
+
+	push_v2f(L, elem->align);
+	lua_setfield(L, -2, "alignment");
+
+	push_v2f(L, elem->size);
+	lua_setfield(L, -2, "size");
+
+	// Deprecated, only for compatibility's sake
+	lua_pushnumber(L, elem->dir);
+	lua_setfield(L, -2, "dir");
+
+	push_v3f(L, elem->world_pos);
+	lua_setfield(L, -2, "world_pos");
+
+	lua_pushnumber(L, elem->z_index);
+	lua_setfield(L, -2, "z_index");
+
+	lua_pushstring(L, elem->text2.c_str());
+	lua_setfield(L, -2, "text2");
+
+	lua_pushinteger(L, elem->style);
+	lua_setfield(L, -2, "style");
+
+	lua_pushboolean(L, elem->hideable);
+	lua_setfield(L, -2, "hideable");
+}
+
+bool read_hud_change(lua_State *L, HudElementStat &stat, HudElement *elem, void **value)
+{
+	std::string statstr = lua_tostring(L, 3);
+	if (!string_to_enum(es_HudElementStat, stat, statstr)) {
+		script_log_unique(L, "Unknown HUD stat type: " + statstr, warningstream);
+		return false;
+	}
+
+	switch (stat) {
+		case HUD_STAT_POS:
+			elem->pos = read_v2f(L, 4);
+			*value = &elem->pos;
+			break;
+		case HUD_STAT_NAME:
+			elem->name = luaL_checkstring(L, 4);
+			*value = &elem->name;
+			break;
+		case HUD_STAT_SCALE:
+			elem->scale = read_v2f(L, 4);
+			*value = &elem->scale;
+			break;
+		case HUD_STAT_TEXT:
+			elem->text = luaL_checkstring(L, 4);
+			*value = &elem->text;
+			break;
+		case HUD_STAT_NUMBER:
+			elem->number = luaL_checknumber(L, 4);
+			*value = &elem->number;
+			break;
+		case HUD_STAT_ITEM:
+			elem->item = luaL_checknumber(L, 4);
+			if (elem->type == HUD_ELEM_WAYPOINT && statstr == "precision")
+				elem->item++;
+			*value = &elem->item;
+			break;
+		case HUD_STAT_DIR:
+			elem->dir = luaL_checknumber(L, 4);
+			*value = &elem->dir;
+			break;
+		case HUD_STAT_ALIGN:
+			elem->align = read_v2f(L, 4);
+			*value = &elem->align;
+			break;
+		case HUD_STAT_OFFSET:
+			elem->offset = read_v2f(L, 4);
+			*value = &elem->offset;
+			break;
+		case HUD_STAT_WORLD_POS:
+			elem->world_pos = read_v3f(L, 4);
+			*value = &elem->world_pos;
+			break;
+		case HUD_STAT_SIZE:
+			elem->size = read_v2f(L, 4);
+			*value = &elem->size;
+			break;
+		case HUD_STAT_Z_INDEX:
+			elem->z_index = MYMAX(S16_MIN, MYMIN(S16_MAX, luaL_checknumber(L, 4)));
+			*value = &elem->z_index;
+			break;
+		case HUD_STAT_TEXT2:
+			elem->text2 = luaL_checkstring(L, 4);
+			*value = &elem->text2;
+			break;
+		case HUD_STAT_STYLE:
+			elem->style = luaL_checknumber(L, 4);
+			*value = &elem->style;
+			break;
+		case HUD_STAT_HIDEABLE:
+			elem->hideable = lua_isnoneornil(L, 4) ? true : lua_toboolean(L, 4);
+			*value = &elem->hideable;
+			break;
+		case HudElementStat_END:
+			return false;
+			break;
+	}
+
+	return true;
+}
+
+/******************************************************************************/
+
+// Indices must match values in `enum CollisionType` exactly!!
+static const char *collision_type_str[] = {
+	"node",
+	"object",
+};
+
+// Indices must match values in `enum CollisionAxis` exactly!!
+static const char *collision_axis_str[] = {
+	"x",
+	"y",
+	"z",
+};
+
+void push_collision_move_result(lua_State *L, const CollisionMoveResult &res)
+{
+	// use faster Lua helper if possible
+	if (res.collisions.size() == 1 && res.collisions.front().type == COLLISION_NODE) {
+		lua_rawgeti(L, LUA_REGISTRYINDEX, CUSTOM_RIDX_PUSH_MOVERESULT1);
+		const auto &c = res.collisions.front();
+		lua_pushboolean(L, res.touching_ground);
+		lua_pushboolean(L, res.collides);
+		lua_pushboolean(L, res.standing_on_object);
+		assert(c.axis != COLLISION_AXIS_NONE);
+		lua_pushinteger(L, static_cast<int>(c.axis));
+		lua_pushinteger(L, c.node_p.X);
+		lua_pushinteger(L, c.node_p.Y);
+		lua_pushinteger(L, c.node_p.Z);
+		for (v3f v : {c.new_pos / BS, c.old_speed / BS, c.new_speed / BS}) {
+			lua_pushnumber(L, v.X);
+			lua_pushnumber(L, v.Y);
+			lua_pushnumber(L, v.Z);
+		}
+		lua_call(L, 3 + 1 + 3 + 3 * 3, 1);
+		return;
+	}
+
+	lua_createtable(L, 0, 4);
+
+	setboolfield(L, -1, "touching_ground", res.touching_ground);
+	setboolfield(L, -1, "collides", res.collides);
+	setboolfield(L, -1, "standing_on_object", res.standing_on_object);
+
+	/* collisions */
+	lua_createtable(L, res.collisions.size(), 0);
+	int i = 1;
+	for (const auto &c : res.collisions) {
+		lua_createtable(L, 0, 6);
+
+		lua_pushstring(L, collision_type_str[c.type]);
+		lua_setfield(L, -2, "type");
+
+		assert(c.axis != COLLISION_AXIS_NONE);
+		lua_pushstring(L, collision_axis_str[c.axis]);
+		lua_setfield(L, -2, "axis");
+
+		if (c.type == COLLISION_NODE) {
+			push_v3s16(L, c.node_p);
+			lua_setfield(L, -2, "node_pos");
+		} else if (c.type == COLLISION_OBJECT) {
+			push_objectRef(L, c.object->getId());
+			lua_setfield(L, -2, "object");
+		}
+
+		push_v3f(L, c.new_pos / BS);
+		lua_setfield(L, -2, "new_pos");
+
+		push_v3f(L, c.old_speed / BS);
+		lua_setfield(L, -2, "old_velocity");
+
+		push_v3f(L, c.new_speed / BS);
+		lua_setfield(L, -2, "new_velocity");
+
+		lua_rawseti(L, -2, i++);
+	}
+	lua_setfield(L, -2, "collisions");
+	/**/
+}
+
+
+void push_mod_spec(lua_State *L, const ModSpec &spec, bool include_unsatisfied)
+{
+	lua_newtable(L);
+
+	lua_pushstring(L, spec.name.c_str());
+	lua_setfield(L, -2, "name");
+
+	lua_pushstring(L, spec.author.c_str());
+	lua_setfield(L, -2, "author");
+
+	lua_pushinteger(L, spec.release);
+	lua_setfield(L, -2, "release");
+
+	lua_pushstring(L, spec.desc.c_str());
+	lua_setfield(L, -2, "description");
+
+	lua_pushstring(L, spec.path.c_str());
+	lua_setfield(L, -2, "path");
+
+	lua_pushstring(L, spec.virtual_path.c_str());
+	lua_setfield(L, -2, "virtual_path");
+
+	if (include_unsatisfied) {
+		lua_newtable(L);
+		int i = 1;
+		for (const auto &dep : spec.unsatisfied_depends) {
+			lua_pushstring(L, dep.c_str());
+			lua_rawseti(L, -2, i++);
+		}
+		lua_setfield(L, -2, "unsatisfied_depends");
+	}
+}
