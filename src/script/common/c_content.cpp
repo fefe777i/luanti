@@ -2424,6 +2424,10 @@ void read_hud_element(lua_State *L, HudElement *elem)
 
 	elem->hideable = getboolfield_default(L, 2, "hideable", true);
 	elem->touchable = getboolfield_default(L, 2, "touchable", false);
+<<<<<<< ours
+=======
+
+>>>>>>> theirs
 	/* check for known deprecated element usage */
 	if ((elem->type  == HUD_ELEM_STATBAR) && (elem->size == v2f()))
 		log_deprecated(L,"Deprecated usage of statbar without size!");
