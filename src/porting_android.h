@@ -94,6 +94,6 @@ v2u32 getDisplaySize();
 
 }
 void pickFileAndroid();
-std::string getPickedFilePathAndroid();
-bool isFilePickedAndroid();
+\tstd::string getPickedFilePathAndroid();
+\tbool isFilePickedAndroid();\n}
 
