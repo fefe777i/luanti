@@ -46,8 +46,8 @@ local function get_formspec(data)
 		"label[0.5,0.4;", fgettext("Character Skin"), "]",
 		"label[0.5,0.8;", fgettext("Choose how you look on servers"), "]",
 
-		"model[0.5,1.5;4.5,5.5;skin_preview;character.b3d;",
-			core.formspec_escape(rel_tex), ";0,180;false;0,0;0;false]",
+		"image[0.5,1.5;4.5,5;",
+			core.formspec_escape(rel_tex), "",
 
 		"label[5.5,1.4;", fgettext("Available skins:"), "]",
 		"textlist[5.5,1.8;5,3.2;skin_list;", list_str, ";", sel, "]",
