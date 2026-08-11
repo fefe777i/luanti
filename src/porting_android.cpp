@@ -322,3 +322,28 @@ bool hasPhysicalKeyboardAndroid()
 }
 
 }
+
+void pickFileAndroid()
+{
+	jmethodID pickFile = jnienv->GetMethodID(activityClass, "pickFile", "()V");
+	if (pickFile != nullptr) {
+		jnienv->CallVoidMethod(activity, pickFile);
+	}
+}
+
+std::string getPickedFilePathAndroid()
+{
+	jmethodID getPath = jnienv->GetMethodID(activityClass, "getPickedFilePath", "()Ljava/lang/String;");
+	if (getPath == nullptr) return "";
+	jobject result = jnienv->CallObjectMethod(activity, getPath);
+	if (result == nullptr) return "";
+	return readJavaString((jstring) result);
+}
+
+bool isFilePickedAndroid()
+{
+	jmethodID isPicked = jnienv->GetMethodID(activityClass, "isFilePicked", "()Z");
+	if (isPicked == nullptr) return false;
+	return jnienv->CallBooleanMethod(activity, isPicked);
+}
+
