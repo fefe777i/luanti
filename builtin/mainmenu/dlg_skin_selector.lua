@@ -1,4 +1,4 @@
--- Workshop 47 / Skin Selector Dialog
+-- Workshop 47 / Skin Selector Dialog (final version)
 
 local function get_skins_dir()
 	return core.get_texturepath_share() .. DIR_DELIM .. "base" ..
@@ -33,35 +33,32 @@ local function get_formspec(data)
 
 	local new_skin_msg = ""
 	if data.new_skin_name and data.new_skin_name ~= "" then
-		new_skin_msg = "label[5.5,5.4;" .. core.colorize("#00ff00",
+		new_skin_msg = "label[0.5,5.8;" .. core.colorize("#00ff00",
 			"Added: " .. core.formspec_escape(data.new_skin_name)) .. "]"
 	end
 
 	return table.concat({
 		"formspec_version[4]",
-		"size[11,8]",
+		"size[8,7]",
 		ws47_theme.STYLE_PREFIX,
-		"box[0,0;11,8;", ws47_theme.COLOR_BG, "]",
+		"box[0,0;8,7;", ws47_theme.COLOR_BG, "]",
 
 		"label[0.5,0.4;", fgettext("Character Skin"), "]",
 		"label[0.5,0.8;", fgettext("Choose how you look on servers"), "]",
 
-		-- 2D preview — спрощений шлях без підпапки
-		"box[0.5,1.4;4,4.2;#1a1a2e]",
-		"image[0.5,1.4;4,4.2;skin_preview.png]",
-
-		"label[5.5,1.4;", fgettext("Available skins:"), "]",
-		"textlist[5.5,1.8;5,3.2;skin_list;", list_str, ";", sel, "]",
+		"label[0.5,1.4;", fgettext("Available skins:"), "]",
+		"textlist[0.5,1.8;7,2.8;skin_list;", list_str, ";", sel, "]",
 
 		new_skin_msg,
 
-		"label[5.5,5.8;", fgettext("Selected: "), core.formspec_escape(skin_file), "]",
+		"label[0.5,5.2;", fgettext("Selected: "), core.formspec_escape(skin_file), "]",
 
-		"button[5.5,6.3;2.3,0.7;btn_skin_select;", fgettext("Wear Skin"), "]",
-		"button[7.9,6.3;2.3,0.7;btn_skin_back;", fgettext("Back"), "]",
+		"button[0.5,5.9;2,0.7;btn_skin_select;", fgettext("Wear Skin"), "]",
+		"button[2.7,5.9;2,0.7;btn_skin_back;", fgettext("Back"), "]",
+		"button[4.9,5.9;2,0.7;btn_skin_add;", fgettext("+ Add Skin"), "]",
 
-		"button[5.5,7.1;2.3,0.7;btn_skin_add;", fgettext("+ Add Skin"), "]",
-		"button[7.9,7.1;2.3,0.7;btn_skin_refresh;", fgettext("Refresh"), "]",
+		"label[0.5,6.7;", core.colorize("#aaaaaa",
+			fgettext("Skins folder: ") .. skin_dir), "]",
 	})
 end
 
@@ -72,13 +69,6 @@ local function handle_buttons(this, fields)
 			this.data.selected = evt.row
 			return true
 		end
-	end
-
-	if fields.btn_skin_refresh then
-		local skins, dir = get_skins()
-		this.data.skins = skins
-		this.data.skin_dir = dir
-		return true
 	end
 
 	if fields.btn_skin_add then
