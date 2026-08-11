@@ -401,7 +401,8 @@ public class GameActivity extends SDLActivity {
             while ((len = in.read(buf)) > 0) out.write(buf, 0, len);
             in.close();
             out.close();
-            runOnUiThread(() -> Toast.makeText(this, "Skin saved: " + name, Toast.LENGTH_SHORT).show());
+            final String finalName = name;
+            runOnUiThread(() -> Toast.makeText(this, "Skin saved: " + finalName, Toast.LENGTH_SHORT).show());
             return name;
         } catch (Exception e) {
             Log.e("GameActivity", "Failed to copy skin: " + e.getMessage());
