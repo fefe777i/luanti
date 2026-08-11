@@ -3,6 +3,9 @@
 // Copyright (C) 2013 sapier
 
 #include "lua_api/l_mainmenu.h"
+#ifdef __ANDROID__
+#include "porting_android.h"
+#endif
 #include "lua_api/l_internal.h"
 #include "common/c_content.h"
 #include "config.h"

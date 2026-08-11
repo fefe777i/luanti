@@ -6,7 +6,6 @@
 
 #include "lua_api/l_base.h"
 
-
 /** Implementation of lua api support for mainmenu */
 class ModApiMainMenu: public ModApiBase
 {
@@ -135,9 +134,9 @@ private:
 
 	static int l_get_max_supp_proto(lua_State *L);
 
-	static int l_get_formspec_version(lua_State  *L);
+	static int l_get_formspec_version(lua_State *L);
 
-	static int l_is_debug_build(lua_State  *L);
+	static int l_is_debug_build(lua_State *L);
 
 	// other
 	static int l_open_url(lua_State *L);
@@ -153,6 +152,11 @@ private:
 
 	// clipboard
 	static int l_copy_to_clipboard(lua_State *L);
+
+	// Workshop 47: skin file picker
+	static int l_pick_skin_file(lua_State *L);
+	static int l_get_picked_skin_path(lua_State *L);
+	static int l_is_file_picked(lua_State *L);
 
 public:
 

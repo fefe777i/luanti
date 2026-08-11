@@ -1,6 +1,6 @@
 // Luanti
 // SPDX-License-Identifier: LGPL-2.1-or-later
-// Copyright (C) 2014 celeron55, Perttu Ahola <celeron55@gmail.com>
+// Copyright (C) 2014 celeron55, Perttu Ahola
 
 #pragma once
 
@@ -86,14 +86,14 @@ std::string getInputDialogMessage();
  */
 int getInputDialogSelection();
 
-
 bool hasPhysicalKeyboardAndroid();
 
 float getDisplayDensity();
 v2u32 getDisplaySize();
 
-}
+// Workshop 47: Skin File Picker
 void pickFileAndroid();
-\tstd::string getPickedFilePathAndroid();
-\tbool isFilePickedAndroid();\n}
+std::string getPickedFilePathAndroid();
+bool isFilePickedAndroid();
 
+} // namespace porting
