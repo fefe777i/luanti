@@ -24,7 +24,6 @@ local function get_formspec(data)
 	local skins, skin_dir = data.skins, data.skin_dir
 	local sel = data.selected or 1
 	local skin_file = skins[sel] or "character.png"
-	local rel_tex = "skins/" .. skin_file
 
 	local escaped_skins = {}
 	for _, s in ipairs(skins) do
@@ -43,11 +42,13 @@ local function get_formspec(data)
 		"size[11,8]",
 		ws47_theme.STYLE_PREFIX,
 		"box[0,0;11,8;", ws47_theme.COLOR_BG, "]",
+
 		"label[0.5,0.4;", fgettext("Character Skin"), "]",
 		"label[0.5,0.8;", fgettext("Choose how you look on servers"), "]",
 
-		"image[0.5,1.5;4.5,5;",
-			core.formspec_escape(rel_tex), "",
+		-- 2D preview — спрощений шлях без підпапки
+		"box[0.5,1.4;4,4.2;#1a1a2e]",
+		"image[0.5,1.4;4,4.2;skin_preview.png]",
 
 		"label[5.5,1.4;", fgettext("Available skins:"), "]",
 		"textlist[5.5,1.8;5,3.2;skin_list;", list_str, ";", sel, "]",
