@@ -17,7 +17,7 @@
 
 #include <cstdlib>
 #define SDL_MAIN_HANDLED 1
-#include <SDL3/SDL.h>
+#include <SDL.h>
 
 #include <jni.h>
 #include <android/log.h>
