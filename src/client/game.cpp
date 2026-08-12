@@ -1418,6 +1418,12 @@ void Game::processUserInput(f32 dtime)
 
 	processKeyInput();
 	processItemSelection(&runData.new_playeritem);
+
+	if (g_touchcontrols) {
+		std::optional<std::string> touched = g_touchcontrols->getTouchedHudElement();
+		if (touched)
+			client->sendHudTouch(*touched);
+	}
 }
 
 
@@ -2300,6 +2306,7 @@ void Game::handleClientEvent_HudAdd(ClientEvent *event, CameraOrientation *cam)
 	e->text2     = event->hudadd->text2;
 	e->style     = event->hudadd->style;
 	e->hideable  = event->hudadd->hideable;
+	e->touchable = event->hudadd->touchable;
 	m_hud_server_to_client[server_id] = player->hud.add(std::move(e));
 
 	delete event->hudadd;

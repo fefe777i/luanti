@@ -314,6 +314,34 @@ int ModApiClient::l_get_csm_restrictions(lua_State *L)
 	return 1;
 }
 
+// set_ghost_node(pos, node_name)
+// Client-side-only visual node overlay: no server interaction, no
+// collision. Intended for build previews (schematics, WorldEdit-like
+// tools, etc).
+int ModApiClient::l_set_ghost_node(lua_State *L)
+{
+	v3s16 pos = read_v3s16(L, 1);
+	std::string node_name = luaL_checkstring(L, 2);
+
+	getClient(L)->setGhostNode(pos, node_name);
+	return 0;
+}
+
+// remove_ghost_node(pos)
+int ModApiClient::l_remove_ghost_node(lua_State *L)
+{
+	v3s16 pos = read_v3s16(L, 1);
+	getClient(L)->removeGhostNode(pos);
+	return 0;
+}
+
+// clear_ghost_nodes()
+int ModApiClient::l_clear_ghost_nodes(lua_State *L)
+{
+	getClient(L)->clearGhostNodes();
+	return 0;
+}
+
 void ModApiClient::Initialize(lua_State *L, int top)
 {
 	API_FCT(get_current_modname);
@@ -334,6 +362,9 @@ void ModApiClient::Initialize(lua_State *L, int top)
 	API_FCT(get_builtin_path);
 	API_FCT(get_language);
 	API_FCT(get_csm_restrictions);
+	API_FCT(set_ghost_node);
+	API_FCT(remove_ghost_node);
+	API_FCT(clear_ghost_nodes);
 }
 
 void ModApiClient::InitializeSSCSM(lua_State *L, int top)

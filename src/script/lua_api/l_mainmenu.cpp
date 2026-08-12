@@ -3,6 +3,9 @@
 // Copyright (C) 2013 sapier
 
 #include "lua_api/l_mainmenu.h"
+#ifdef __ANDROID__
+#include "porting_android.h"
+#endif
 #include "lua_api/l_internal.h"
 #include "common/c_content.h"
 #include "config.h"
@@ -1138,6 +1141,37 @@ int ModApiMainMenu::l_copy_to_clipboard(lua_State *L)
 }
 
 /******************************************************************************/
+// Workshop 47: skin file picker
+int ModApiMainMenu::l_pick_skin_file(lua_State *L)
+{
+#ifdef __ANDROID__
+	porting::pickFileAndroid();
+#endif
+	return 0;
+}
+
+int ModApiMainMenu::l_get_picked_skin_path(lua_State *L)
+{
+#ifdef __ANDROID__
+	std::string path = porting::getPickedFilePathAndroid();
+	lua_pushstring(L, path.c_str());
+#else
+	lua_pushstring(L, "");
+#endif
+	return 1;
+}
+
+int ModApiMainMenu::l_is_file_picked(lua_State *L)
+{
+#ifdef __ANDROID__
+	lua_pushboolean(L, porting::isFilePickedAndroid());
+#else
+	lua_pushboolean(L, false);
+#endif
+	return 1;
+}
+
+
 void ModApiMainMenu::Initialize(lua_State *L, int top)
 {
 	API_FCT(update_formspec);
@@ -1193,6 +1227,10 @@ void ModApiMainMenu::Initialize(lua_State *L, int top)
 	API_FCT(share_file);
 	API_FCT(do_async_callback);
 	API_FCT(copy_to_clipboard);
+	// Workshop 47 skin picker
+	API_FCT(pick_skin_file);
+	API_FCT(get_picked_skin_path);
+	API_FCT(is_file_picked);
 
 	lua_pushboolean(L, g_first_run);
 	lua_setfield(L, top, "is_first_run");

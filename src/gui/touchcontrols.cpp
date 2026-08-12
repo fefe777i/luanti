@@ -392,6 +392,25 @@ std::optional<u16> TouchControls::getHotbarSelection()
 	return selection;
 }
 
+bool TouchControls::isTouchableHudButton(const SEvent &event)
+{
+	const v2s32 touch_pos = v2s32(event.TouchInput.X, event.TouchInput.Y);
+	for (auto &[name, rect] : m_touchable_hud_rects) {
+		if (rect.isPointInside(touch_pos)) {
+			m_touched_hud_element = name;
+			return true;
+		}
+	}
+	return false;
+}
+
+std::optional<std::string> TouchControls::getTouchedHudElement()
+{
+	auto touched = m_touched_hud_element;
+	m_touched_hud_element = std::nullopt;
+	return touched;
+}
+
 void TouchControls::handleReleaseEvent(size_t pointer_id)
 {
 	// By the way: Android reuses pointer IDs, so m_pointer_pos[pointer_id]
@@ -501,6 +520,11 @@ void TouchControls::translateEvent(const SEvent &event)
 		// handle hotbar
 		if (isHotbarButton(event))
 			// already handled in isHotbarButton()
+			return;
+
+		// handle mod-defined touchable HUD buttons
+		if (isTouchableHudButton(event))
+			// already handled in isTouchableHudButton()
 			return;
 
 		// Select joystick when joystick tapped (fixed joystick position) or
@@ -675,6 +699,16 @@ void TouchControls::resetHotbarRects()
 void TouchControls::registerHotbarRect(u16 index, const recti &rect)
 {
 	m_hotbar_rects[index] = rect;
+}
+
+void TouchControls::resetTouchableHudRects()
+{
+	m_touchable_hud_rects.clear();
+}
+
+void TouchControls::registerTouchableHudRect(const std::string &name, const recti &rect)
+{
+	m_touchable_hud_rects[name] = rect;
 }
 
 void TouchControls::setVisible(bool visible)

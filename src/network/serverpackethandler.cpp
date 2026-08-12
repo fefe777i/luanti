@@ -817,6 +817,27 @@ void Server::handleCommand_Damage(NetworkPacket* pkt)
 	}
 }
 
+void Server::handleCommand_HudTouch(NetworkPacket* pkt)
+{
+	std::string hud_element_name;
+	*pkt >> hud_element_name;
+
+	session_t peer_id = pkt->getPeerId();
+	RemotePlayer *player = m_env->getPlayer(peer_id);
+	if (!player) {
+		warningstream << FUNCTION_NAME << ": player is null" << std::endl;
+		return;
+	}
+
+	PlayerSAO *playersao = player->getPlayerSAO();
+	if (!playersao) {
+		warningstream << FUNCTION_NAME << ": player SAO is null" << std::endl;
+		return;
+	}
+
+	m_script->on_playerHudTouch(playersao, hud_element_name);
+}
+
 void Server::handleCommand_PlayerItem(NetworkPacket* pkt)
 {
 	if (pkt->getSize() < 2)

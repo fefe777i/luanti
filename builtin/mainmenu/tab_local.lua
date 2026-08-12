@@ -159,11 +159,14 @@ local function get_formspec(tabview, name, tabdata)
 
 		local button_y = H * 2/3 - 0.6
 		return table.concat({
+			ws47_theme.STYLE_PREFIX,
+			"box[0,0;", tostring(W), ",", tostring(H), ";", ws47_theme.COLOR_BG, "]",
 			"hypertext[0.375,0;", W - 2*0.375, ",", button_y, ";ht;", core.formspec_escape(hypertext), "]",
 			"button[5.25,", button_y, ";5,1.2;game_open_cdb;", fgettext("Install a game"), "]"})
 	end
 
-	local retval = ""
+	local retval = ws47_theme.STYLE_PREFIX ..
+		"box[0,0;" .. tostring(tabview.width) .. "," .. tostring(tabview.height) .. ";" .. ws47_theme.COLOR_BG .. "]"
 
 	local index = core.get_textlist_index("sp_worlds") or filterlist.get_current_index(menudata.worldlist,
 				tonumber(core.settings:get("mainmenu_last_selected_world"))) or 0
@@ -453,6 +456,7 @@ local function on_change(type)
 		else
 			mm_game_theme.set_engine()
 		end
+		mm_game_theme.clear_single("header")
 
 		if singleplayer_refresh_gamebar() then
 			ui.find_by_name("game_button_bar"):show()

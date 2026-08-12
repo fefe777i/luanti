@@ -196,9 +196,7 @@ local function get_formspec(data)
 		"button[3.25,7;2.5,0.5;btn_config_world_save;" ..
 		fgettext("Save") .. "]" ..
 		"button[5.75,7;2.5,0.5;btn_config_world_cancel;" ..
-		fgettext("Cancel") .. "]" ..
-		"button[9,7;2.5,0.5;btn_config_world_cdb;" ..
-		fgettext("Find More Mods") .. "]"
+		fgettext("Cancel") .. "]"
 
 	if mod.name ~= "" and not mod.always_on then
 		if mod.is_modpack then

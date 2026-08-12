@@ -99,6 +99,7 @@ struct HudElement {
 	std::string text2;
 	u32 style;
 	bool hideable = true;
+	bool touchable = false;
 };
 
 extern const EnumString es_HudElementType[];

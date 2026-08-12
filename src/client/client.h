@@ -43,6 +43,7 @@ class MtEventManager;
 class NetworkPacket;
 class NodeDefManager;
 class ParticleManager;
+class WieldMeshSceneNode;
 class RenderingEngine;
 class SingleMediaDownloader;
 class ClientScripting;
@@ -231,6 +232,12 @@ public:
 	void sendChangePassword(const std::string &oldpassword,
 		const std::string &newpassword);
 	void sendDamage(u16 damage);
+	void sendHudTouch(const std::string &hud_element_name);
+
+	// Client-side-only "ghost" nodes (CSM), never touch the real map/server
+	void setGhostNode(v3s16 pos, const std::string &node_name);
+	void removeGhostNode(v3s16 pos);
+	void clearGhostNodes();
 	void sendRespawnLegacy();
 	void sendReady();
 	void sendHaveMedia(const std::vector<u32> &tokens);
@@ -501,6 +508,7 @@ private:
 	std::unique_ptr<MeshUpdateManager> m_mesh_update_manager;
 	ClientEnvironment m_env;
 	std::unique_ptr<ParticleManager> m_particle_manager;
+	std::map<v3s16, WieldMeshSceneNode*> m_ghost_nodes;
 	std::unique_ptr<con::IConnection> m_con;
 	std::string m_address_name;
 	ELoginRegister m_allow_login_or_register = ELoginRegister::Any;

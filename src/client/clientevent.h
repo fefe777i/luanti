@@ -53,6 +53,7 @@ struct ClientEventHudAdd
 	v2f size;
 	s16 z_index;
 	bool hideable;
+	bool touchable;
 };
 
 struct ClientEventHudChange

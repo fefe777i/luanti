@@ -877,6 +877,31 @@ bool GUITable::OnEvent(const SEvent &event)
 			return true;
 		}
 
+		// Drag-to-scroll: lets a finger (or mouse) drag the list content
+		// directly up/down, instead of only being able to grab the thin
+		// scrollbar handle. A small movement threshold distinguishes a
+		// drag gesture from a simple tap/click used for row selection.
+		const s32 DRAG_THRESHOLD_PX = 10;
+
+		if (event.MouseInput.Event == EMIE_LMOUSE_PRESSED_DOWN) {
+			m_drag_active = false;
+			m_drag_start_y = p.Y;
+			m_drag_start_scrollpos = m_scrollbar->getPos();
+		} else if (event.MouseInput.Event == EMIE_LMOUSE_LEFT_UP) {
+			m_drag_active = false;
+		} else if (event.MouseInput.Event == EMIE_MOUSE_MOVED &&
+				event.MouseInput.isLeftPressed()) {
+			s32 delta = p.Y - m_drag_start_y;
+			s32 abs_delta = delta < 0 ? -delta : delta;
+			if (!m_drag_active && abs_delta > DRAG_THRESHOLD_PX)
+				m_drag_active = true;
+
+			if (m_drag_active) {
+				m_scrollbar->setPos(m_drag_start_scrollpos - delta);
+				return true;
+			}
+		}
+
 		// Find hovered row and cell
 		bool really_hovering = false;
 		s32 row_i = getRowAt(p.Y, really_hovering);

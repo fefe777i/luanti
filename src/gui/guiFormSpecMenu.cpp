@@ -89,7 +89,8 @@ inline u32 clamp_u8(s32 value)
 GUIFormSpecMenu::GUIFormSpecMenu(gui::IGUIElement *parent, s32 id, IMenuManager *menumgr,
 		Client *client, gui::IGUIEnvironment *guienv, ISimpleTextureSource *tsrc,
 		ISoundManager *sound_manager, IFormSource *fsrc, TextDest *tdst,
-		const std::string &formspecPrepend, bool remap_dbl_click):
+		const std::string &formspecPrepend, bool remap_dbl_click,
+		scene::ISceneManager *model_smgr, IShaderSource *model_shadersrc):
 	GUIModalMenu(guienv, parent, id, menumgr, remap_dbl_click),
 	m_invmgr(client),
 	m_tsrc(tsrc),
@@ -105,6 +106,12 @@ GUIFormSpecMenu::GUIFormSpecMenu(gui::IGUIElement *parent, s32 id, IMenuManager 
 
 	m_tooltip_show_delay = (u32)g_settings->getS32("tooltip_show_delay");
 	m_tooltip_append_itemname = g_settings->getBool("tooltip_append_itemname");
+
+	// model[] needs a scene manager + shader source. When there's a real
+	// Client (in-game formspecs), reuse its own; otherwise (main menu)
+	// fall back to whatever was explicitly passed in.
+	m_model_smgr = model_smgr;
+	m_model_shadersrc = model_shadersrc;
 }
 
 GUIFormSpecMenu::~GUIFormSpecMenu()
@@ -2773,7 +2780,15 @@ void GUIFormSpecMenu::parseSetFocus(parserData*, const std::string &element)
 
 void GUIFormSpecMenu::parseModel(parserData *data, const std::string &element)
 {
-	MY_CHECKCLIENT("model");
+	scene::ISceneManager *model_smgr = m_client ? m_client->getSceneManager() : m_model_smgr;
+	IShaderSource *model_shadersrc = m_client ? m_client->getShaderSource() : m_model_shadersrc;
+
+	if (!model_smgr || !model_shadersrc) {
+		errorstream << "Attempted to use element \"model\" without a scene "
+			"manager / shader source available (client == nullptr and "
+			"no main-menu model support was wired up)." << std::endl;
+		return;
+	}
 
 	std::vector<std::string> parts;
 	if (!precheckElement("model", element, 5, 10, parts))
@@ -2812,7 +2827,13 @@ void GUIFormSpecMenu::parseModel(parserData *data, const std::string &element)
 	if (!data->explicit_size)
 		warningstream << "invalid use of model without a size[] element" << std::endl;
 
-	scene::IAnimatedMesh *mesh = m_client->getMesh(meshstr);
+	// In-game: meshes come from the client's downloaded-media cache.
+	// Main menu: no such cache exists yet, load straight from disk -
+	// meshstr is expected to already be an absolute/loadable path in
+	// this case (e.g. built via defaulttexturedir .. "character.b3d").
+	scene::IAnimatedMesh *mesh = m_client ?
+			m_client->getMesh(meshstr) :
+			model_smgr->getMesh(meshstr.c_str());
 
 	if (!mesh) {
 		errorstream << "Invalid model element: Unable to load mesh:"
@@ -2830,9 +2851,9 @@ void GUIFormSpecMenu::parseModel(parserData *data, const std::string &element)
 	core::rect<s32> rect(pos, pos + geom);
 
 	GUIScene *e = new GUIScene(Environment,
-			m_client->getSceneManager(),
+			model_smgr,
 			data->current_parent,
-			m_client->getShaderSource(),
+			model_shadersrc,
 			rect,
 			spec.fid);
 

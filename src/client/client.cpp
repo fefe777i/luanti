@@ -25,6 +25,8 @@
 #include "guiscalingfilter.h"
 #include "item_visuals_manager.h"
 #include "itemdef.h"
+#include "nodedef.h"
+#include "wieldmesh.h"
 #include "mapblock.h"
 #include "mapblock_mesh.h"
 #include "mapnode.h"
@@ -397,6 +399,8 @@ Client::~Client()
 	m_shutdown = true;
 	if (m_con)
 		m_con->Disconnect();
+
+	clearGhostNodes();
 
 	deleteAuthData();
 
@@ -1432,6 +1436,59 @@ void Client::sendDamage(u16 damage)
 	NetworkPacket pkt(TOSERVER_DAMAGE, sizeof(u16));
 	pkt << damage;
 	Send(&pkt);
+}
+
+void Client::sendHudTouch(const std::string &hud_element_name)
+{
+	NetworkPacket pkt(TOSERVER_HUD_TOUCH, 0);
+	pkt << hud_element_name;
+	Send(&pkt);
+}
+
+void Client::setGhostNode(v3s16 pos, const std::string &node_name)
+{
+	content_t id;
+	if (!ndef()->getId(node_name, id))
+		return; // unknown node name, ignore silently
+
+	// Replace any existing ghost node at this position first
+	removeGhostNode(pos);
+
+	auto *scenenode = new WieldMeshSceneNode(getSceneManager(), -1);
+
+	ItemStack item(node_name, 1, 0, idef());
+	scenenode->setItem(item, this, false);
+
+	// setItem() always shrinks node meshes down to hand-held "wield" size
+	// internally; override that back to full real-world node size here.
+	scenenode->setStaticNodeScale(1.0f);
+
+	// Semi-transparent white tint so the underlying node texture still
+	// shows through, giving the classic "ghost block" preview look.
+	scenenode->setColor(video::SColor(140, 255, 255, 255));
+
+	scenenode->setPosition(intToFloat(pos, BS));
+
+	scenenode->drop(); // the scene manager already grabbed a reference
+
+	m_ghost_nodes[pos] = scenenode;
+}
+
+void Client::removeGhostNode(v3s16 pos)
+{
+	auto it = m_ghost_nodes.find(pos);
+	if (it == m_ghost_nodes.end())
+		return;
+
+	it->second->remove();
+	m_ghost_nodes.erase(it);
+}
+
+void Client::clearGhostNodes()
+{
+	for (auto &it : m_ghost_nodes)
+		it.second->remove();
+	m_ghost_nodes.clear();
 }
 
 void Client::sendRespawnLegacy()

@@ -40,6 +40,9 @@ import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.Toast;
 import android.content.res.Configuration;
+import android.provider.DocumentsContract;
+import android.database.Cursor;
+import android.provider.OpenableColumns;
 
 import androidx.annotation.Keep;
 import androidx.appcompat.app.AlertDialog;
@@ -83,6 +86,11 @@ public class GameActivity extends SDLActivity {
 	private DialogState inputDialogState = DialogState.DIALOG_CANCELED;
 	private String messageReturnValue = "";
 	private int selectionReturnValue = 0;
+    // Skin file picker
+    private String pickedFilePath = "";
+    private boolean filePicked = false;
+    private static final int PICK_SKIN_REQUEST = 1001;
+
 
 	private native void saveSettings();
 
@@ -116,6 +124,9 @@ public class GameActivity extends SDLActivity {
 		AlertDialog alertDialog = builder.create();
 		CustomEditText editText = new CustomEditText(this, editType);
 		container.addView(editText);
+		editText.setBackground(null); // прибрати стандартний зелений/сірий фон Android
+		editText.setTextColor(0xFFFFFFFF); // білий текст, щоб було видно на темному тлі
+		editText.setHintTextColor(0x99FFFFFF);
 		editText.setMaxLines(8);
 		editText.setHint(hint);
 		editText.setText(current);
@@ -333,4 +344,70 @@ public class GameActivity extends SDLActivity {
 		gameNotificationShown = show;
 		updateGameNotification();
 	}
+
+    public void pickFile() {
+        runOnUiThread(() -> {
+            Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+            intent.addCategory(Intent.CATEGORY_OPENABLE);
+            intent.setType("image/png");
+            try {
+                startActivityForResult(intent, PICK_SKIN_REQUEST);
+            } catch (ActivityNotFoundException e) {
+                Toast.makeText(this, "No file picker found", Toast.LENGTH_SHORT).show();
+            }
+        });
+    }
+
+    public String getPickedFilePath() {
+        if (filePicked) {
+            filePicked = false;
+            return pickedFilePath;
+        }
+        return "";
+    }
+
+    public boolean isFilePicked() {
+        return filePicked;
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == PICK_SKIN_REQUEST && resultCode == RESULT_OK && data != null) {
+            Uri uri = data.getData();
+            if (uri != null) {
+                pickedFilePath = copyFileToSkins(uri);
+                filePicked = true;
+            }
+        }
+    }
+
+    private String copyFileToSkins(Uri uri) {
+        try {
+            String name = "skin.png";
+            Cursor cursor = getContentResolver().query(uri, null, null, null, null);
+            if (cursor != null && cursor.moveToFirst()) {
+                int idx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME);
+                if (idx >= 0) name = cursor.getString(idx);
+                cursor.close();
+            }
+            java.io.File skinsDir = new java.io.File(getUserDataPath(), "textures/base/pack/skins");
+            if (!skinsDir.exists()) skinsDir.mkdirs();
+            java.io.File outFile = new java.io.File(skinsDir, name);
+            java.io.InputStream in = getContentResolver().openInputStream(uri);
+            java.io.FileOutputStream out = new java.io.FileOutputStream(outFile);
+            byte[] buf = new byte[4096];
+            int len;
+            while ((len = in.read(buf)) > 0) out.write(buf, 0, len);
+            in.close();
+            out.close();
+            final String finalName = name;
+            runOnUiThread(() -> Toast.makeText(this, "Skin saved: " + finalName, Toast.LENGTH_SHORT).show());
+            return name;
+        } catch (Exception e) {
+            Log.e("GameActivity", "Failed to copy skin: " + e.getMessage());
+            return "";
+        }
+    }
+
 }

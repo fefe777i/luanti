@@ -344,6 +344,9 @@ void Hud::drawLuaElements(const v3s16 &camera_offset, bool only_unhidable)
 	const u32 text_height = g_fontengine->getTextHeight();
 	gui::IGUIFont *const font = g_fontengine->getFont();
 
+	if (g_touchcontrols && !only_unhidable)
+		g_touchcontrols->resetTouchableHudRects();
+
 	std::vector<HudElement*> elems;
 
 	elems.reserve(player->hud.getElements().size() + player->csm_hud.getElements().size());
@@ -507,6 +510,9 @@ void Hud::drawLuaElements(const v3s16 &camera_offset, bool only_unhidable)
 				draw2DImageFilterScaled(driver, texture, rect,
 					core::rect<s32>(core::position2d<s32>(0,0), imgsize),
 					NULL, colors, true);
+
+				if (e->touchable && g_touchcontrols)
+					g_touchcontrols->registerTouchableHudRect(e->name, rect);
 				break; }
 			case HUD_ELEM_COMPASS: {
 				video::ITexture *texture = tsrc->getTexture(e->text);
