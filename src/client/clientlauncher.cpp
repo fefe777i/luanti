@@ -557,7 +557,7 @@ void ClientLauncher::main_menu(MainMenuData *menudata)
 	}
 
 	/* show main menu */
-	GUIEngine mymenu(guiroot, m_rendering_engine, &g_menumgr, menudata, *kill);
+	GUIEngine mymenu(guiroot, m_rendering_engine, &g_menumgr, menudata, *kill, ssrc.get());
 
 	/* leave scene manager in a clean state */
 	m_rendering_engine->get_scene_manager()->clear();

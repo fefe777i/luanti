@@ -114,11 +114,13 @@ GUIEngine::GUIEngine(gui::IGUIElement *parent,
 		RenderingEngine *rendering_engine,
 		IMenuManager *menumgr,
 		MainMenuData *data,
-		volatile std::sig_atomic_t &kill) :
+		volatile std::sig_atomic_t &kill,
+		IShaderSource *shadersrc) :
 	m_rendering_engine(rendering_engine),
 	m_parent(parent),
 	m_menumanager(menumgr),
 	m_smgr(rendering_engine->get_scene_manager()),
+	m_shadersrc(shadersrc),
 	m_data(data),
 	m_kill(kill)
 {
@@ -173,7 +175,9 @@ GUIEngine::GUIEngine(gui::IGUIElement *parent,
 			formspecgui.release(),
 			buttonhandler.release(),
 			"",
-			false);
+			false,
+			m_smgr,
+			m_shadersrc);
 
 	m_menu->defaultAllowClose(false);
 	m_menu->lockSize(true,v2u32(800,600));

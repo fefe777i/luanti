@@ -42,6 +42,7 @@ struct image_definition {
 class GUIEngine;
 class RenderingEngine;
 class MainMenuScripting;
+class IShaderSource;
 struct MainMenuData;
 
 /******************************************************************************/
@@ -131,7 +132,8 @@ public:
 			RenderingEngine *rendering_engine,
 			IMenuManager *menumgr,
 			MainMenuData *data,
-			volatile std::sig_atomic_t &kill);
+			volatile std::sig_atomic_t &kill,
+			IShaderSource *shadersrc = nullptr);
 
 	/** default destructor */
 	virtual ~GUIEngine();
@@ -193,6 +195,7 @@ private:
 	IMenuManager                         *m_menumanager = nullptr;
 	/** scene manager to add scene elements to */
 	scene::ISceneManager                 *m_smgr = nullptr;
+	IShaderSource                        *m_shadersrc = nullptr;
 	/** pointer to data beeing transfered back to main game handling */
 	MainMenuData                         *m_data = nullptr;
 	/** texture source */

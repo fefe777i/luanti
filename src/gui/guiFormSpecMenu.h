@@ -27,6 +27,7 @@ class ISimpleTextureSource;
 class Client;
 class GUIScrollContainer;
 class ISoundManager;
+class IShaderSource;
 
 enum FormspecFieldType {
 	f_Button,
@@ -158,7 +159,11 @@ public:
 			IFormSource* fs_src,
 			TextDest* txt_dst,
 			const std::string &formspecPrepend,
-			bool remap_dbl_click = true);
+			bool remap_dbl_click = true,
+			// Only needed when client == nullptr (main menu formspecs),
+			// to allow model[] to work without a full Client object.
+			scene::ISceneManager *model_smgr = nullptr,
+			IShaderSource *model_shadersrc = nullptr);
 
 	~GUIFormSpecMenu();
 
@@ -324,6 +329,9 @@ protected:
 	ISimpleTextureSource *m_tsrc;
 	ISoundManager *m_sound_manager;
 	Client *m_client;
+	// Used by model[] when m_client is null (main menu formspecs)
+	scene::ISceneManager *m_model_smgr = nullptr;
+	IShaderSource *m_model_shadersrc = nullptr;
 
 	std::string m_formspec_string;
 	std::string m_formspec_prepend;
