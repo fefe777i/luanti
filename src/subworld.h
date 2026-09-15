@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "irr_v3d.h"
 #include <string>
 #include <unordered_map>
 
