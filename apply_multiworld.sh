@@ -38,69 +38,69 @@ patch('src/script/lua_api/l_server.h',
 'l_server.h declarations')
 
 patch('src/server.cpp',
-'''\nu16 Server::getProtocolVersionMin()\n''',
-r'''\nbool Server::createSubWorld(const std::string &name)
+'''u16 Server::getProtocolVersionMin()\n''',
+'''bool Server::createSubWorld(const std::string &name)
 {
-	if (name.empty() || name == "." || name == ".." || name == "overworld" ||
-		name.find('/') != std::string::npos || name.find('\\') != std::string::npos)
-		return false;
+\tif (name.empty() || name == "." || name == ".." || name == "overworld" ||
+\t\tname.find('/') != std::string::npos || name.find('\\\\') != std::string::npos)
+\t\treturn false;
 
-	const std::string path = m_path_world + DIR_DELIM + name;
-	if (isSubWorldDir(path))
-		return true;
-	if (fs::PathExists(path))
-		return false;
-	if (!fs::CreateDir(path))
-		return false;
+\tconst std::string path = m_path_world + DIR_DELIM + name;
+\tif (isSubWorldDir(path))
+\t\treturn true;
+\tif (fs::PathExists(path))
+\t\treturn false;
+\tif (!fs::CreateDir(path))
+\t\treturn false;
 
-	const std::string worldmt = path + DIR_DELIM + "world.mt";
-	return fs::safeWriteToFile(worldmt, "gameid = minetest\n");
+\tconst std::string worldmt = path + DIR_DELIM + "world.mt";
+\treturn fs::safeWriteToFile(worldmt, "gameid = minetest\\n");
 }
 
 void Server::transferPlayer(const std::string &playername,
-		const std::string &subworld_name, v3f pos)
+\t\tconst std::string &subworld_name, v3f pos)
 {
-	PlayerSAO *sao = nullptr;
-	for (session_t peer_id : m_clients.getClientIDs()) {
-		RemoteClient *client = getClient(peer_id);
-		if (client && client->getName() == playername) {
-			sao = getPlayerSAO(peer_id);
-			break;
-		}
-	}
-	if (!sao)
-		return;
+\tPlayerSAO *sao = nullptr;
+\tfor (session_t peer_id : m_clients.getClientIDs()) {
+\t\tRemoteClient *client = getClient(peer_id);
+\t\tif (client && client->getName() == playername) {
+\t\t\tsao = getPlayerSAO(peer_id);
+\t\t\tbreak;
+\t\t}
+\t}
+\tif (!sao)
+\t\treturn;
 
-	if (subworld_name != "overworld" &&
-		!isSubWorldDir(m_path_world + DIR_DELIM + subworld_name))
-		return;
+\tif (subworld_name != "overworld" &&
+\t\t!isSubWorldDir(m_path_world + DIR_DELIM + subworld_name))
+\t\treturn;
 
-	auto &state = m_player_subworld_states[playername];
-	state.positions[state.current_subworld] = sao->getBasePosition();
-	state.current_subworld = subworld_name;
-	state.positions[subworld_name] = pos;
-	sao->setBasePosition(pos);
-	SendMovePlayer(sao);
+\tauto &state = m_player_subworld_states[playername];
+\tstate.positions[state.current_subworld] = sao->getBasePosition();
+\tstate.current_subworld = subworld_name;
+\tstate.positions[subworld_name] = pos;
+\tsao->setBasePosition(pos);
+\tSendMovePlayer(sao);
 }
 
 std::string Server::getPlayerSubWorld(const std::string &playername)
 {
-	auto it = m_player_subworld_states.find(playername);
-	if (it == m_player_subworld_states.end())
-		return "overworld";
-	return it->second.current_subworld;
+\tauto it = m_player_subworld_states.find(playername);
+\tif (it == m_player_subworld_states.end())
+\t\treturn "overworld";
+\treturn it->second.current_subworld;
 }
 
 std::vector<std::string> Server::listSubWorlds()
 {
-	std::vector<std::string> result{"overworld"};
-	for (const auto &node : fs::GetDirListing(m_path_world)) {
-		if (!node.dir || node.name.empty() || node.name[0] == '.' || node.name == "overworld")
-			continue;
-		if (isSubWorldDir(m_path_world + DIR_DELIM + node.name))
-			result.push_back(node.name);
-	}
-	return result;
+\tstd::vector<std::string> result{"overworld"};
+\tfor (const auto &node : fs::GetDirListing(m_path_world)) {
+\t\tif (!node.dir || node.name.empty() || node.name[0] == '.' || node.name == "overworld")
+\t\t\tcontinue;
+\t\tif (isSubWorldDir(m_path_world + DIR_DELIM + node.name))
+\t\t\tresult.push_back(node.name);
+\t}
+\treturn result;
 }
 
 u16 Server::getProtocolVersionMin()
@@ -109,43 +109,43 @@ u16 Server::getProtocolVersionMin()
 
 patch('src/script/lua_api/l_server.cpp',
 '''void ModApiServer::Initialize(lua_State *L, int top)\n''',
-r'''int ModApiServer::l_create_subworld(lua_State *L)
+'''int ModApiServer::l_create_subworld(lua_State *L)
 {
-	NO_MAP_LOCK_REQUIRED;
-	std::string name = luaL_checkstring(L, 1);
-	lua_pushboolean(L, getServer(L)->createSubWorld(name));
-	return 1;
+\tNO_MAP_LOCK_REQUIRED;
+\tstd::string name = luaL_checkstring(L, 1);
+\tlua_pushboolean(L, getServer(L)->createSubWorld(name));
+\treturn 1;
 }
 
 int ModApiServer::l_transfer_player(lua_State *L)
 {
-	NO_MAP_LOCK_REQUIRED;
-	std::string pname = luaL_checkstring(L, 1);
-	std::string swname = luaL_checkstring(L, 2);
-	v3f pos = check_v3f(L, 3);
-	getServer(L)->transferPlayer(pname, swname, pos);
-	return 0;
+\tNO_MAP_LOCK_REQUIRED;
+\tstd::string pname = luaL_checkstring(L, 1);
+\tstd::string swname = luaL_checkstring(L, 2);
+\tv3f pos = check_v3f(L, 3);
+\tgetServer(L)->transferPlayer(pname, swname, pos);
+\treturn 0;
 }
 
 int ModApiServer::l_get_player_subworld(lua_State *L)
 {
-	NO_MAP_LOCK_REQUIRED;
-	std::string pname = luaL_checkstring(L, 1);
-	lua_pushstring(L, getServer(L)->getPlayerSubWorld(pname).c_str());
-	return 1;
+\tNO_MAP_LOCK_REQUIRED;
+\tstd::string pname = luaL_checkstring(L, 1);
+\tlua_pushstring(L, getServer(L)->getPlayerSubWorld(pname).c_str());
+\treturn 1;
 }
 
 int ModApiServer::l_list_subworlds(lua_State *L)
 {
-	NO_MAP_LOCK_REQUIRED;
-	auto list = getServer(L)->listSubWorlds();
-	lua_newtable(L);
-	int i = 1;
-	for (const auto &name : list) {
-		lua_pushstring(L, name.c_str());
-		lua_rawseti(L, -2, i++);
-	}
-	return 1;
+\tNO_MAP_LOCK_REQUIRED;
+\tauto list = getServer(L)->listSubWorlds();
+\tlua_newtable(L);
+\tint i = 1;
+\tfor (const auto &name : list) {
+\t\tlua_pushstring(L, name.c_str());
+\t\tlua_rawseti(L, -2, i++);
+\t}
+\treturn 1;
 }
 
 void ModApiServer::Initialize(lua_State *L, int top)
