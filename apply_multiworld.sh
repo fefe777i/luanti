@@ -59,7 +59,6 @@ patch('src/server.cpp', 'u16 Server::getProtocolVersionMin()\n', '''bool Server:
 \tstate.current_subworld = subworld_name;
 \tstate.positions[subworld_name] = pos;
 \tsao->setBasePosition(pos);
-\tSendMovePlayer(sao);
 }
 \nstd::string Server::getPlayerSubWorld(const std::string &playername)
 {
