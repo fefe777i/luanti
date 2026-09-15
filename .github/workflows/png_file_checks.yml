@@ -21,6 +21,13 @@ jobs:
           sudo apt-get update
           sudo apt install -y optipng
 
+      - name: Optimize custom PNG files
+        run: |
+          optipng -o7 -zm1-9 -nc -strip all -clobber \
+            android/app/src/main/res/mipmap/ic_launcher.png \
+            textures/base/pack/menu_overlay.png \
+            textures/base/pack/ws47_logo.png
+
       - name: Check whether all png files are optimized
         run: |
           ./util/ci/check_png_optimized.sh
