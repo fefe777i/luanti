@@ -14,6 +14,7 @@ on:
       - 'cmake/Modules/**'
       - 'po/**.po'
       - 'android/**'
+      - 'apply_multiworld.sh'
       - '.github/workflows/android.yml'
   pull_request:
     paths:
@@ -27,6 +28,7 @@ on:
       - 'cmake/Modules/**'
       - 'po/**.po'
       - 'android/**'
+      - 'apply_multiworld.sh'
       - '.github/workflows/android.yml'
 
 jobs:
@@ -34,6 +36,8 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
     - uses: actions/checkout@v7
+    - name: Apply Multiworld
+      run: bash apply_multiworld.sh
     - name: Install deps
       run: |
         sudo apt-get update
@@ -44,7 +48,7 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
     - name: Build AAB with Gradle
-      # We build an AAB as well for uploading to the the Play Store.
+      # We build an AAB as well for uploading to the Play Store.
       run: cd android; ./gradlew bundlerelease
     - name: Build APKs with Gradle
       # "assemblerelease" is very fast after "bundlerelease".
