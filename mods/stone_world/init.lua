@@ -1,8 +1,8 @@
 local MOD = minetest.get_current_modname()
 local STORAGE = minetest.get_mod_storage()
 local WORLD_NAME = "stone_world"
-local OFFSET = 1000000
-local SPAWN = vector.new(OFFSET, 20, 0)
+local OFFSET = 200000
+local SPAWN = vector.new(0, 20, 0)
 local ITEM = MOD .. ":teleporter"
 local RETURN_KEY = "return_pos"
 local WORLD_KEY = "world"
@@ -77,15 +77,15 @@ local function enter_stone_world(player)
 		save_return_pos(player)
 	end
 
-	move_player(player, WORLD_NAME, vector.add(SPAWN, vector.new(0, 2, 0)))
+	move_player(player, WORLD_NAME, SPAWN)
 
 	minetest.after(0.2, function()
 		if player:is_player() then
 			set_stone_area(
-				vector.new(SPAWN.x - 32, SPAWN.y - 32, SPAWN.z - 32),
-				vector.new(SPAWN.x + 32, SPAWN.y + 32, SPAWN.z + 32)
+				vector.new(OFFSET - 32, SPAWN.y - 32, SPAWN.z - 32),
+				vector.new(OFFSET + 32, SPAWN.y + 32, SPAWN.z + 32)
 			)
-			player:set_pos(vector.add(SPAWN, vector.new(0, 2, 0)))
+			player:set_pos(vector.new(OFFSET, SPAWN.y + 2, SPAWN.z))
 		end
 	end)
 	return true
@@ -127,7 +127,7 @@ minetest.register_on_joinplayer(function(player)
 	if world == WORLD_NAME and minetest.get_player_subworld and minetest.transfer_player then
 		minetest.after(0.2, function()
 			if player:is_player() then
-				minetest.transfer_player(name, WORLD_NAME, vector.add(SPAWN, vector.new(0, 2, 0)))
+				minetest.transfer_player(name, WORLD_NAME, vector.new(0, 22, 0))
 			end
 		end)
 	end
