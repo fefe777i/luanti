@@ -49,3 +49,5 @@ jobs:
           git add src/gui/guiFormSpecMenu.h src/gui/guiFormSpecMenu.cpp .github/workflows/repair_gui_compile.yml
           git commit -m 'Fix GUI model compile errors'
           git push
+
+# Triggered once to apply the repair.
