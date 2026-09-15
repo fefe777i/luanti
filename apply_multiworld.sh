@@ -4,124 +4,83 @@ set -e
 REPO_ROOT="$(cd "$(dirname "$0")" && pwd)"
 cd "$REPO_ROOT"
 
-fail() { echo "ERROR: $1" >&2; exit 1; }
+python3 - <<'PY'
+from pathlib import Path
 
-# 1. Create the SubWorld state header if it is missing.
-if [ ! -f src/subworld.h ]; then
-cat > src/subworld.h <<'SUBWORLD_H'
-#pragma once
+root = Path('.')
 
-#include <string>
-#include <unordered_map>
-#include <vector>
+def patch(path, old, new, label):
+    p = root / path
+    s = p.read_text()
+    if new in s:
+        print(f"SKIP: {label} already applied")
+        return
+    if old not in s:
+        raise SystemExit(f"ERROR: anchor not found for {label}: {path}")
+    p.write_text(s.replace(old, new, 1))
+    print(f"OK: {label}")
 
-#include "irr_v3d.h"
-#include "filesys.h"
+patch('src/server.h', '#include "server/clientiface.h"\n', '#include "server/clientiface.h"\n#include "subworld.h"\n', 'server.h include')
 
-struct PlayerSubWorldState {
-	std::string current_subworld = "overworld";
-	std::unordered_map<std::string, v3f> positions;
-};
+patch('src/server.h',
+'''\tstd::vector<std::pair<std::string, std::string>> m_mapgen_init_files;\n''',
+'''\tstd::vector<std::pair<std::string, std::string>> m_mapgen_init_files;\n\n\tstd::unordered_map<std::string, PlayerSubWorldState> m_player_subworld_states;\n''',
+'server.h state member')
 
-static inline bool isSubWorldDir(const std::string &path)
+patch('src/server.h',
+'''\tstd::string getWorldPath() const override { return m_path_world; }\n''',
+'''\tstd::string getWorldPath() const override { return m_path_world; }\n\n\t// === Multiworld ===\n\tbool createSubWorld(const std::string &name);\n\tvoid transferPlayer(const std::string &playername, const std::string &subworld_name, v3f pos);\n\tstd::string getPlayerSubWorld(const std::string &playername);\n\tstd::vector<std::string> listSubWorlds();\n''',
+'server.h Multiworld API')
+
+patch('src/script/lua_api/l_server.h',
+'''\t// serialize_roundtrip(obj)\n\tstatic int l_serialize_roundtrip(lua_State *L);\n''',
+'''\t// serialize_roundtrip(obj)\n\tstatic int l_serialize_roundtrip(lua_State *L);\n\n\t// create_subworld(name)\n\tstatic int l_create_subworld(lua_State *L);\n\n\t// transfer_player(name, subworld_name, pos)\n\tstatic int l_transfer_player(lua_State *L);\n\n\t// get_player_subworld(name)\n\tstatic int l_get_player_subworld(lua_State *L);\n\n\t// list_subworlds()\n\tstatic int l_list_subworlds(lua_State *L);\n''',
+'l_server.h declarations')
+
+patch('src/server.cpp',
+'''\nu16 Server::getProtocolVersionMin()\n''',
+r'''\nbool Server::createSubWorld(const std::string &name)
 {
-	return fs::PathExists(path + DIR_DELIM + "world.mt");
-}
-SUBWORLD_H
-fi
-
-# 2. Add the server member and public API declarations.
-python3 - <<'PY'
-from pathlib import Path
-p = Path('src/server.h')
-s = p.read_text()
-
-if '#include "subworld.h"' not in s:
-    anchor = '#include "translation.h"'
-    if anchor not in s:
-        raise SystemExit('server.h: include anchor not found')
-    s = s.replace(anchor, anchor + '\n#include "subworld.h"', 1)
-
-if 'm_player_subworld_states' not in s:
-    anchor = '\tstd::unique_ptr<ServerScripting> m_script;'
-    if anchor not in s:
-        raise SystemExit('server.h: member anchor not found')
-    s = s.replace(anchor, anchor + '\n\n\tstd::unordered_map<std::string, PlayerSubWorldState> m_player_subworld_states;', 1)
-
-if 'bool createSubWorld(const std::string &name);' not in s:
-    anchor = '\tstd::string getWorldPath() const override { return m_path_world; }'
-    if anchor not in s:
-        raise SystemExit('server.h: public method anchor not found')
-    add = '''\n\t// === Multiworld ===\n\tbool createSubWorld(const std::string &name);\n\tvoid transferPlayer(const std::string &playername, const std::string &subworld_name, v3f pos);\n\tstd::string getPlayerSubWorld(const std::string &playername);\n\tstd::vector<std::string> listSubWorlds();\n'''
-    s = s.replace(anchor, anchor + add, 1)
-
-p.write_text(s)
-PY
-
-# 3. Add the Lua API declarations.
-python3 - <<'PY'
-from pathlib import Path
-p = Path('src/script/lua_api/l_server.h')
-s = p.read_text()
-if 'l_create_subworld' not in s:
-    anchor = '    // serialize_roundtrip(obj)\n    static int l_serialize_roundtrip(lua_State *L);'
-    if anchor not in s:
-        anchor = '\t// serialize_roundtrip(obj)\n\tstatic int l_serialize_roundtrip(lua_State *L);'
-    if anchor not in s:
-        raise SystemExit('l_server.h: serialize_roundtrip anchor not found')
-    add = '''\n\n\t// create_subworld(name)\n\tstatic int l_create_subworld(lua_State *L);\n\n\t// transfer_player(name, subworld_name, pos)\n\tstatic int l_transfer_player(lua_State *L);\n\n\t// get_player_subworld(name)\n\tstatic int l_get_player_subworld(lua_State *L);\n\n\t// list_subworlds()\n\tstatic int l_list_subworlds(lua_State *L);'''
-    s = s.replace(anchor, anchor + add, 1)
-p.write_text(s)
-PY
-
-# 4. Add the Server implementation and Lua API implementation.
-python3 - <<'PY'
-from pathlib import Path
-p = Path('src/server.cpp')
-s = p.read_text()
-if 'bool Server::createSubWorld' not in s:
-    code = r'''
-
-// Multiworld — реалізація підсвітів
-bool Server::createSubWorld(const std::string &name)
-{
-	if (name.empty() || name == "." || name == ".." || name == "overworld")
+	if (name.empty() || name == "." || name == ".." || name == "overworld" ||
+		name.find('/') != std::string::npos || name.find('\\') != std::string::npos)
 		return false;
 
-	std::string path = m_path_world + DIR_DELIM + name;
+	const std::string path = m_path_world + DIR_DELIM + name;
+	if (isSubWorldDir(path))
+		return true;
 	if (fs::PathExists(path))
 		return false;
-
 	if (!fs::CreateDir(path))
 		return false;
 
-	// A minimal world.mt makes the directory recognizable as a subworld.
-	std::string worldmt = path + DIR_DELIM + "world.mt";
-	if (!fs::safeWriteToFile(worldmt, "gameid = minetest\n"))
-		return false;
-
-	infostream << "createSubWorld: created '" << name << "' at " << path << std::endl;
-	return true;
+	const std::string worldmt = path + DIR_DELIM + "world.mt";
+	return fs::safeWriteToFile(worldmt, "gameid = minetest\n");
 }
 
 void Server::transferPlayer(const std::string &playername,
 		const std::string &subworld_name, v3f pos)
 {
-	PlayerSAO *sao = getPlayerSAO(playername);
+	PlayerSAO *sao = nullptr;
+	for (session_t peer_id : m_clients.getClientIDs()) {
+		RemoteClient *client = getClient(peer_id);
+		if (client && client->getName() == playername) {
+			sao = getPlayerSAO(peer_id);
+			break;
+		}
+	}
 	if (!sao)
 		return;
 
-	std::string sw_path = m_path_world + DIR_DELIM + subworld_name;
-	if (!isSubWorldDir(sw_path) && subworld_name != "overworld") {
-		errorstream << "transferPlayer: subworld '" << subworld_name << "' not found" << std::endl;
+	if (subworld_name != "overworld" &&
+		!isSubWorldDir(m_path_world + DIR_DELIM + subworld_name))
 		return;
-	}
 
 	auto &state = m_player_subworld_states[playername];
 	state.positions[state.current_subworld] = sao->getBasePosition();
 	state.current_subworld = subworld_name;
 	state.positions[subworld_name] = pos;
 	sao->setBasePosition(pos);
+	SendMovePlayer(sao);
 }
 
 std::string Server::getPlayerSubWorld(const std::string &playername)
@@ -134,40 +93,27 @@ std::string Server::getPlayerSubWorld(const std::string &playername)
 
 std::vector<std::string> Server::listSubWorlds()
 {
-	std::vector<std::string> result;
-	result.push_back("overworld");
-
-	auto nodes = fs::GetDirListing(m_path_world);
-	for (const auto &node : nodes) {
-		if (!node.dir)
-			continue;
-		if (node.name == "." || node.name == ".." || node.name == "overworld")
+	std::vector<std::string> result{"overworld"};
+	for (const auto &node : fs::GetDirListing(m_path_world)) {
+		if (!node.dir || node.name.empty() || node.name[0] == '.' || node.name == "overworld")
 			continue;
 		if (isSubWorldDir(m_path_world + DIR_DELIM + node.name))
 			result.push_back(node.name);
 	}
 	return result;
 }
-'''
-    # Append near the end; definitions do not need to be adjacent to other Server methods.
-    s += code
-p.write_text(s)
-PY
 
-python3 - <<'PY'
-from pathlib import Path
-p = Path('src/script/lua_api/l_server.cpp')
-s = p.read_text()
-if 'int ModApiServer::l_create_subworld' not in s:
-    code = r'''
+u16 Server::getProtocolVersionMin()
+''',
+'server.cpp Multiworld implementation')
 
-// Multiworld Lua API
-int ModApiServer::l_create_subworld(lua_State *L)
+patch('src/script/lua_api/l_server.cpp',
+'''void ModApiServer::Initialize(lua_State *L, int top)\n''',
+r'''int ModApiServer::l_create_subworld(lua_State *L)
 {
 	NO_MAP_LOCK_REQUIRED;
 	std::string name = luaL_checkstring(L, 1);
-	bool ok = getServer(L)->createSubWorld(name);
-	lua_pushboolean(L, ok);
+	lua_pushboolean(L, getServer(L)->createSubWorld(name));
 	return 1;
 }
 
@@ -185,8 +131,7 @@ int ModApiServer::l_get_player_subworld(lua_State *L)
 {
 	NO_MAP_LOCK_REQUIRED;
 	std::string pname = luaL_checkstring(L, 1);
-	std::string sw = getServer(L)->getPlayerSubWorld(pname);
-	lua_pushstring(L, sw.c_str());
+	lua_pushstring(L, getServer(L)->getPlayerSubWorld(pname).c_str());
 	return 1;
 }
 
@@ -196,35 +141,26 @@ int ModApiServer::l_list_subworlds(lua_State *L)
 	auto list = getServer(L)->listSubWorlds();
 	lua_newtable(L);
 	int i = 1;
-	for (auto &name : list) {
+	for (const auto &name : list) {
 		lua_pushstring(L, name.c_str());
 		lua_rawseti(L, -2, i++);
 	}
 	return 1;
 }
-'''
-    # Insert before Initialize so declarations/definitions are in the expected API section.
-    marker = 'void ModApiServer::Initialize(lua_State *L, int top)'
-    if marker not in s:
-        raise SystemExit('l_server.cpp: Initialize anchor not found')
-    s = s.replace(marker, code + '\n' + marker, 1)
 
-for line in [
-    '\tAPI_FCT(create_subworld);',
-    '\tAPI_FCT(transfer_player);',
-    '\tAPI_FCT(get_player_subworld);',
-    '\tAPI_FCT(list_subworlds);',
-]:
-    if line not in s:
-        marker = '\tAPI_FCT(serialize_roundtrip);'
-        if marker not in s:
-            raise SystemExit('l_server.cpp: registration anchor not found')
-        s = s.replace(marker, marker + '\n' + line, 1)
+void ModApiServer::Initialize(lua_State *L, int top)
+''',
+'l_server.cpp functions')
 
-p.write_text(s)
+patch('src/script/lua_api/l_server.cpp',
+'''\tAPI_FCT(serialize_roundtrip);\n''',
+'''\tAPI_FCT(serialize_roundtrip);\n\tAPI_FCT(create_subworld);\n\tAPI_FCT(transfer_player);\n\tAPI_FCT(get_player_subworld);\n\tAPI_FCT(list_subworlds);\n''',
+'l_server.cpp registration')
+
+patch('lib/lstrpack/CMakeLists.txt',
+'''\tPRIVATE\n\t\t${LUA_INCLUDE_DIR}\n''',
+'''\tPRIVATE\n\t\t${PROJECT_SOURCE_DIR}/lib/lua/src\n\t\t${LUA_INCLUDE_DIR}\n''',
+'lstrpack Lua include fallback')
+
+print('=== Multiworld patch complete ===')
 PY
-
-echo "Multiworld changes applied."
-echo "Now run:"
-echo "  cmake -S . -B build"
-echo "  cmake --build build -j2"
