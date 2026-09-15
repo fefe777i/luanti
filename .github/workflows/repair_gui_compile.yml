@@ -24,8 +24,9 @@ jobs:
 
           h = Path('src/gui/guiFormSpecMenu.h')
           s = h.read_text()
-          if '#include <ISceneManager.h>' not in s:
-              s = s.replace('#include <IGUIStaticText.h>\n', '#include <IGUIStaticText.h>\n#include <ISceneManager.h>\n')
+          if 'class ISceneManager;' not in s:
+              marker = 'class IShaderSource;\n'
+              s = s.replace(marker, marker + '\nnamespace irr {\nnamespace scene {\nclass ISceneManager;\n}\n}\n')
           h.write_text(s)
 
           cpp = Path('src/gui/guiFormSpecMenu.cpp')
@@ -39,10 +40,10 @@ jobs:
           new = '''scene::IAnimatedMesh *mesh = nullptr;
 \tif (m_client) {
 \t\tmesh = m_client->getMesh(meshstr);
-\t} else if (m_model_smgr) {
+\t} else {
 \t\tio::IReadFile *file = RenderingEngine::get_raw_device()->getFileSystem()->createAndOpenFile(meshstr.c_str());
 \t\tif (file) {
-\t\t\tmesh = m_model_smgr->getMesh(file);
+\t\t\tmesh = model_smgr->getMesh(file);
 \t\t\tfile->drop();
 \t\t}
 \t}'''
@@ -61,4 +62,4 @@ jobs:
           git commit -m 'Fix GUI model compile errors'
           git push
 
-# Triggered with an exact matcher for the current model block.
+# Triggered with a forward declaration and file-based mesh loading.
