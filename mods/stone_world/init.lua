@@ -124,7 +124,7 @@ minetest.register_on_joinplayer(function(player)
 
 	local name = player:get_player_name()
 	local world = STORAGE:get_string(WORLD_KEY .. ":" .. name)
-	if world == WORLD_NAME and minetest.get_player_subworld then
+	if world == WORLD_NAME and minetest.get_player_subworld and minetest.transfer_player then
 		minetest.after(0.2, function()
 			if player:is_player() then
 				minetest.transfer_player(name, WORLD_NAME, vector.add(SPAWN, vector.new(0, 2, 0)))
