@@ -1,10 +1,10 @@
 local MOD = minetest.get_current_modname()
 local STORAGE = minetest.get_mod_storage()
+local WORLD_NAME = "stone_world"
 local OFFSET = 1000000
 local SPAWN = vector.new(OFFSET, 20, 0)
 local ITEM = MOD .. ":teleporter"
 local RETURN_KEY = "return_pos"
-local IN_WORLD_KEY = "in_stone_world"
 
 local function is_stone_world(pos)
 	return pos.x >= OFFSET - 100000 and pos.x <= OFFSET + 100000
@@ -36,8 +36,7 @@ local function set_stone_area(minp, maxp)
 	for z = minp.z, maxp.z do
 		for y = minp.y, maxp.y do
 			for x = minp.x, maxp.x do
-				local i = area:index(x, y, z)
-				data[i] = stone
+				data[area:index(x, y, z)] = stone
 			end
 		end
 	end
@@ -54,18 +53,30 @@ minetest.register_on_generated(function(minp, maxp)
 	set_stone_area(minp, maxp)
 end)
 
+if minetest.create_subworld then
+	minetest.create_subworld(WORLD_NAME)
+end
+
+local function move_player(player, world_name, pos)
+	local name = player:get_player_name()
+	if minetest.transfer_player then
+		minetest.transfer_player(name, world_name, pos)
+	else
+		player:set_pos(pos)
+	end
+end
+
 local function enter_stone_world(player)
 	if not player or not player:is_player() then
 		return false
 	end
 
-	local name = player:get_player_name()
 	if not is_stone_world(player:get_pos()) then
 		save_return_pos(player)
 	end
 
-	STORAGE:set_string(IN_WORLD_KEY .. ":" .. name, "1")
-	player:set_pos(vector.add(SPAWN, vector.new(0, 2, 0)))
+	move_player(player, WORLD_NAME, vector.add(SPAWN, vector.new(0, 2, 0)))
+
 	minetest.after(0.2, function()
 		if player:is_player() then
 			set_stone_area(
@@ -85,8 +96,7 @@ local function leave_stone_world(player)
 
 	local name = player:get_player_name()
 	local pos = load_return_pos(player) or vector.new(0, 20, 0)
-	STORAGE:set_string(IN_WORLD_KEY .. ":" .. name, "0")
-	player:set_pos(pos)
+	move_player(player, "overworld", pos)
 	return true
 end
 
