@@ -2,9 +2,9 @@ name: android
 
 on:
   push:
-    branches: [workshop47]
+    branches: [workshop47, workshop47-multiworld]
   pull_request:
-    branches: [workshop47]
+    branches: [workshop47, workshop47-multiworld]
 
 jobs:
   build:
