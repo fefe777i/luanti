@@ -5,6 +5,7 @@ local OFFSET = 1000000
 local SPAWN = vector.new(OFFSET, 20, 0)
 local ITEM = MOD .. ":teleporter"
 local RETURN_KEY = "return_pos"
+local WORLD_KEY = "world"
 
 local function is_stone_world(pos)
 	return pos.x >= OFFSET - 100000 and pos.x <= OFFSET + 100000
@@ -64,6 +65,7 @@ local function move_player(player, world_name, pos)
 	else
 		player:set_pos(pos)
 	end
+	STORAGE:set_string(WORLD_KEY .. ":" .. name, world_name)
 end
 
 local function enter_stone_world(player)
@@ -118,6 +120,16 @@ minetest.register_on_joinplayer(function(player)
 	local inv = player:get_inventory()
 	if not inv:contains_item("main", ITEM) then
 		inv:add_item("main", ITEM)
+	end
+
+	local name = player:get_player_name()
+	local world = STORAGE:get_string(WORLD_KEY .. ":" .. name)
+	if world == WORLD_NAME and minetest.get_player_subworld then
+		minetest.after(0.2, function()
+			if player:is_player() then
+				minetest.transfer_player(name, WORLD_NAME, vector.add(SPAWN, vector.new(0, 2, 0)))
+			end
+		end)
 	end
 end)
 
