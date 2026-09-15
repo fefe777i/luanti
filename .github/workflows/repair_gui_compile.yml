@@ -1,0 +1,51 @@
+name: One-shot GUI compile repair
+
+on:
+  push:
+    branches: [workshop47-multiworld]
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Repair GUI model compile errors
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          h = Path('src/gui/guiFormSpecMenu.h')
+          s = h.read_text()
+          if '#include <ISceneManager.h>' not in s:
+              s = s.replace('#include <IGUIStaticText.h>\n', '#include <IGUIStaticText.h>\n#include <ISceneManager.h>\n')
+          h.write_text(s)
+
+          cpp = Path('src/gui/guiFormSpecMenu.cpp')
+          s = cpp.read_text()
+          old = '''\tscene::IAnimatedMesh *mesh = m_client ?\n\t\t\t m_client->getMesh(meshstr) :\n\t\t\tmodel_smgr->getMesh(meshstr.c_str());'''.replace('            ','\t\t\t')
+          old2 = '''\tscene::IAnimatedMesh *mesh = m_client ?\n\t\t\t m_client->getMesh(meshstr) :\n\t\t\tmodel_smgr->getMesh(meshstr.c_str());'''
+          new = '''\tscene::IAnimatedMesh *mesh = nullptr;\n\tif (m_client) {\n\t\tmesh = m_client->getMesh(meshstr);\n\t} else if (m_model_smgr) {\n\t\tio::IReadFile *file = RenderingEngine::get_raw_device()->getFileSystem()->createAndOpenFile(meshstr.c_str());\n\t\tif (file) {\n\t\t\tmesh = m_model_smgr->getMesh(file);\n\t\t\tfile->drop();\n\t\t}\n\t}'''
+          if old2 in s:
+              s = s.replace(old2, new)
+          elif old in s:
+              s = s.replace(old, new)
+          else:
+              raise SystemExit('model mesh block not found')
+          cpp.write_text(s)
+          PY
+
+      - name: Commit repair
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          rm -f .github/workflows/repair_gui_compile.yml
+          git add src/gui/guiFormSpecMenu.h src/gui/guiFormSpecMenu.cpp .github/workflows/repair_gui_compile.yml
+          git commit -m 'Fix GUI model compile errors'
+          git push
