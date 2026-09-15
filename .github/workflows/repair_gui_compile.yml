@@ -31,10 +31,12 @@ jobs:
           cpp = Path('src/gui/guiFormSpecMenu.cpp')
           s = cpp.read_text()
           pattern = re.compile(
-              r'\tscene::IAnimatedMesh\s*\*mesh\s*=.*?model_smgr->getMesh\([^;]*\);',
+              r'scene::IAnimatedMesh\s*\*mesh\s*=\s*m_client\s*\?\s*'
+              r'm_client->getMesh\(meshstr\)\s*:\s*'
+              r'model_smgr->getMesh\(meshstr\.c_str\(\)\);',
               re.S,
           )
-          new = '''\tscene::IAnimatedMesh *mesh = nullptr;
+          new = '''scene::IAnimatedMesh *mesh = nullptr;
 \tif (m_client) {
 \t\tmesh = m_client->getMesh(meshstr);
 \t} else if (m_model_smgr) {
@@ -59,4 +61,4 @@ jobs:
           git commit -m 'Fix GUI model compile errors'
           git push
 
-# Triggered again with a robust source matcher.
+# Triggered with an exact matcher for the current model block.
