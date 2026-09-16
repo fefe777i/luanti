@@ -33,6 +33,19 @@ jobs:
               s = s.replace(marker, marker + '\nnamespace scene {\nclass ISceneManager;\n}\n', 1)
           h.write_text(s)
           PY
+      - name: Repair GUI model loader API
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p = Path('src/gui/guiFormSpecMenu.cpp')
+          s = p.read_text()
+          old = 'scene::IAnimatedMesh *mesh = m_client ?\n\t\t\tm_client->getMesh(meshstr) :\n\t\t\tmodel_smgr->getMesh(meshstr.c_str());'
+          new = 'scene::IAnimatedMesh *mesh = m_client ?\n\t\t\tm_client->getMesh(meshstr) : nullptr;'
+          if old not in s:
+              raise SystemExit('GUI model loader block not found')
+          p.write_text(s.replace(old, new, 1))
+          PY
       - name: Force Android linker to lld
         run: |
           python3 - <<'PY'
