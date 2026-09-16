@@ -27,11 +27,7 @@ jobs:
               marker = 'class IShaderSource;\n'
               if marker not in s:
                   raise SystemExit('GUI header marker not found')
-              s = s.replace(
-                  marker,
-                  marker + '\nnamespace irr {\nnamespace scene {\nclass ISceneManager;\n}\n}\n',
-                  1,
-              )
+              s = s.replace(marker, marker + '\nnamespace irr {\nnamespace scene {\nclass ISceneManager;\n}\n}\n', 1)
               h.write_text(s)
 
           cpp = Path('src/gui/guiFormSpecMenu.cpp')
@@ -63,12 +59,9 @@ jobs:
               replacement = '''\tif(lto_supported)
 \t\tset(CMAKE_INTERPROCEDURAL_OPTIMIZATION TRUE)
 
-\t\t# Modern Android NDKs use lld; CMake's Clang IPO setup may select gold.
 \t\tif(ANDROID)
-\t\t\tstring(REPLACE "-fuse-ld=gold" "-fuse-ld=lld"
-\t\t\t\tCMAKE_C_LINK_OPTIONS_IPO "${CMAKE_C_LINK_OPTIONS_IPO}")
-\t\t\tstring(REPLACE "-fuse-ld=gold" "-fuse-ld=lld"
-\t\t\t\tCMAKE_CXX_LINK_OPTIONS_IPO "${CMAKE_CXX_LINK_OPTIONS_IPO}")
+\t\t\tstring(REPLACE "-fuse-ld=gold" "-fuse-ld=lld" CMAKE_C_LINK_OPTIONS_IPO "${CMAKE_C_LINK_OPTIONS_IPO}")
+\t\t\tstring(REPLACE "-fuse-ld=gold" "-fuse-ld=lld" CMAKE_CXX_LINK_OPTIONS_IPO "${CMAKE_CXX_LINK_OPTIONS_IPO}")
 \t\tendif()
 
 \t\tmessage(STATUS "LTO/IPO is enabled")'''
@@ -76,21 +69,6 @@ jobs:
                   raise SystemExit('CMake LTO insertion point not found')
               cmake.write_text(s.replace(marker, replacement, 1))
           PY
-          grep -q 'namespace scene' src/gui/guiFormSpecMenu.h
-          grep -q 'createAndOpenFile(meshstr.c_str())' src/gui/guiFormSpecMenu.cpp
-          grep -q 'CMAKE_CXX_LINK_OPTIONS_IPO' CMakeLists.txt
-      - name: Commit GUI fixes
-        run: |
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          rm -f .github/workflows/repair_gui_compile.yml .github/workflows/fix_gui.yml trigger_gui_fix.txt
-          git add CMakeLists.txt src/gui/guiFormSpecMenu.h src/gui/guiFormSpecMenu.cpp
-          if git diff --cached --quiet; then
-            echo 'GUI fixes already committed'
-          else
-            git commit -m 'Fix GUI model compile and Android linker setup'
-            git push
-          fi
       - name: Install deps
         run: |
           sudo apt-get update
