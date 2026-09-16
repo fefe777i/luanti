@@ -1,4 +1,4 @@
-name: One-shot GUI and Android compile repair
+name: One-shot GUI compile repair
 
 on:
   push:
@@ -15,29 +15,24 @@ jobs:
         with:
           fetch-depth: 1
 
-      - name: Repair GUI and Android compile errors
-        shell: bash
+      - name: Apply source fixes
         run: |
           set -e
+          sed -i '/^class IShaderSource;$/a\
+\
+namespace irr {\
+namespace scene {\
+class ISceneManager;\
+}\
+}\
+' src/gui/guiFormSpecMenu.h
           python3 - <<'PY'
           from pathlib import Path
-
-          h = Path('src/gui/guiFormSpecMenu.h')
-          s = h.read_text()
-          if 'class ISceneManager;' not in s:
-              marker = 'class IShaderSource;\n'
-              if marker not in s:
-                  raise SystemExit('header marker not found')
-              s = s.replace(
-                  marker,
-                  marker + '\nnamespace irr {\nnamespace scene {\nclass ISceneManager;\n}\n}\n',
-                  1,
-              )
-              h.write_text(s)
-
-          cpp = Path('src/gui/guiFormSpecMenu.cpp')
-          s = cpp.read_text()
-          old = 'scene::IAnimatedMesh *mesh = m_client ? m_client->getMesh(meshstr) : model_smgr->getMesh(meshstr.c_str());'
+          p = Path('src/gui/guiFormSpecMenu.cpp')
+          s = p.read_text()
+          old = '''scene::IAnimatedMesh *mesh = m_client ?
+\t\t\tm_client->getMesh(meshstr) :
+\t\t\tmodel_smgr->getMesh(meshstr.c_str());'''
           new = '''scene::IAnimatedMesh *mesh = nullptr;
 \tif (m_client) {
 \t\tmesh = m_client->getMesh(meshstr);
@@ -49,47 +44,19 @@ jobs:
 \t\t}
 \t}'''
           if old in s:
-              s = s.replace(old, new, 1)
-              cpp.write_text(s)
+              p.write_text(s.replace(old, new, 1))
           elif 'model_smgr->getMesh(meshstr.c_str())' in s:
-              raise SystemExit('GUI model mesh call has unexpected surrounding code')
-
-          cmake = Path('CMakeLists.txt')
-          s = cmake.read_text()
-          if 'CMAKE_CXX_LINK_OPTIONS_IPO' not in s:
-              marker = '''\tif(lto_supported)
-\t\tset(CMAKE_INTERPROCEDURAL_OPTIMIZATION TRUE)
-\t\tmessage(STATUS "LTO/IPO is enabled")'''
-              replacement = '''\tif(lto_supported)
-\t\tset(CMAKE_INTERPROCEDURAL_OPTIMIZATION TRUE)
-
-\t\t# Modern Android NDKs use lld; CMake's Clang IPO setup may select gold.
-\t\tif(ANDROID)
-\t\t\tstring(REPLACE "-fuse-ld=gold" "-fuse-ld=lld"
-\t\t\t\tCMAKE_C_LINK_OPTIONS_IPO "${CMAKE_C_LINK_OPTIONS_IPO}")
-\t\t\tstring(REPLACE "-fuse-ld=gold" "-fuse-ld=lld"
-\t\t\t\tCMAKE_CXX_LINK_OPTIONS_IPO "${CMAKE_CXX_LINK_OPTIONS_IPO}")
-\t\tendif()
-
-\t\tmessage(STATUS "LTO/IPO is enabled")'''
-              if marker not in s:
-                  raise SystemExit('CMake LTO insertion point not found')
-              cmake.write_text(s.replace(marker, replacement, 1))
+              raise SystemExit('unexpected model mesh formatting')
           PY
-
           grep -q 'namespace scene' src/gui/guiFormSpecMenu.h
-          grep -q 'CMAKE_CXX_LINK_OPTIONS_IPO' CMakeLists.txt
           grep -q 'createAndOpenFile(meshstr.c_str())' src/gui/guiFormSpecMenu.cpp
 
-      - name: Commit repair
+      - name: Commit source fixes
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           rm -f .github/workflows/repair_gui_compile.yml
-          git add CMakeLists.txt src/gui/guiFormSpecMenu.h src/gui/guiFormSpecMenu.cpp .github/workflows/repair_gui_compile.yml
-          if git diff --cached --quiet; then
-            echo 'No repair changes needed'
-            exit 0
-          fi
-          git commit -m 'Fix GUI model compile and Android linker setup'
+          git add src/gui/guiFormSpecMenu.h src/gui/guiFormSpecMenu.cpp .github/workflows/repair_gui_compile.yml
+          git diff --cached --quiet && exit 0
+          git commit -m 'Fix GUI model compile errors'
           git push
