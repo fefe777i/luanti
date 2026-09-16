@@ -9,7 +9,6 @@ permissions:
 
 jobs:
   repair:
-    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -24,17 +23,19 @@ jobs:
 
           h = Path('src/gui/guiFormSpecMenu.h')
           s = h.read_text()
-          if 'class ISceneManager;' not in s:
+          if 'namespace irr {\nnamespace scene {\nclass ISceneManager;' not in s:
               marker = 'class IShaderSource;\n'
-              s = s.replace(marker, marker + '\nnamespace irr {\nnamespace scene {\nclass ISceneManager;\n}\n}\n')
+              if marker not in s:
+                  raise SystemExit('header marker not found')
+              s = s.replace(marker, marker + '\nnamespace irr {\nnamespace scene {\nclass ISceneManager;\n}\n}\n', 1)
           h.write_text(s)
 
           cpp = Path('src/gui/guiFormSpecMenu.cpp')
           s = cpp.read_text()
           pattern = re.compile(
-              r'scene::IAnimatedMesh\s*\*mesh\s*=\s*m_client\s*\?\s*'
-              r'm_client->getMesh\(meshstr\)\s*:\s*'
-              r'model_smgr->getMesh\(meshstr\.c_str\(\)\);',
+              r'scene::IAnimatedMesh\\s*\\*mesh\\s*=\\s*m_client\\s*\\?\\s*'
+              r'm_client->getMesh\\(meshstr\\)\\s*:\\s*'
+              r'model_smgr->getMesh\\(meshstr\\.c_str\\(\\)\\);',
               re.S,
           )
           new = '''scene::IAnimatedMesh *mesh = nullptr;
@@ -59,7 +60,5 @@ jobs:
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           rm -f .github/workflows/repair_gui_compile.yml
           git add src/gui/guiFormSpecMenu.h src/gui/guiFormSpecMenu.cpp .github/workflows/repair_gui_compile.yml
-          git commit -m 'Fix GUI model compile errors'
+          git commit -m 'Fix GUI model compile errors' || exit 0
           git push
-
-# Triggered with a forward declaration and file-based mesh loading.
