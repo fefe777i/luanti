@@ -84,7 +84,7 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           rm -f .github/workflows/repair_gui_compile.yml .github/workflows/fix_gui.yml trigger_gui_fix.txt
-          git add CMakeLists.txt src/gui/guiFormSpecMenu.h src/gui/guiFormSpecMenu.cpp .github/workflows/repair_gui_compile.yml .github/workflows/fix_gui.yml trigger_gui_fix.txt
+          git add CMakeLists.txt src/gui/guiFormSpecMenu.h src/gui/guiFormSpecMenu.cpp
           if git diff --cached --quiet; then
             echo 'GUI fixes already committed'
           else
