@@ -33,6 +33,22 @@ jobs:
               s = s.replace(marker, marker + '\nnamespace scene {\nclass ISceneManager;\n}\n', 1)
           h.write_text(s)
           PY
+      - name: Force Android linker to lld
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          for p in Path('.').rglob('*'):
+              if p.is_file() and '.git' not in p.parts:
+                  try:
+                      s = p.read_text()
+                  except (UnicodeDecodeError, OSError):
+                      continue
+                  if '-fuse-ld=gold' in s:
+                      p.write_text(s.replace('-fuse-ld=gold', '-fuse-ld=lld'))
+          PY
+          export LDFLAGS="${LDFLAGS:-} -fuse-ld=lld"
+          export CFLAGS="${CFLAGS:-} -fuse-ld=lld"
+          export CXXFLAGS="${CXXFLAGS:-} -fuse-ld=lld"
       - name: Install deps
         run: |
           sudo apt-get update
