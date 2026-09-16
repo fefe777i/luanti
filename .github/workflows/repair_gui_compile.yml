@@ -1,4 +1,4 @@
-name: One-shot GUI compile repair
+name: One-shot GUI and Android compile repair
 
 on:
   push:
@@ -15,11 +15,10 @@ jobs:
         with:
           fetch-depth: 1
 
-      - name: Repair GUI model compile errors
+      - name: Repair GUI and Android compile errors
         run: |
           python3 - <<'PY'
           from pathlib import Path
-          import re
 
           h = Path('src/gui/guiFormSpecMenu.h')
           s = h.read_text()
@@ -32,12 +31,7 @@ jobs:
 
           cpp = Path('src/gui/guiFormSpecMenu.cpp')
           s = cpp.read_text()
-          pattern = re.compile(
-              r'scene::IAnimatedMesh\\s*\\*mesh\\s*=\\s*m_client\\s*\\?\\s*'
-              r'm_client->getMesh\\(meshstr\\)\\s*:\\s*'
-              r'model_smgr->getMesh\\(meshstr\\.c_str\\(\\)\\);',
-              re.S,
-          )
+          old = '''scene::IAnimatedMesh *mesh = m_client ? m_client->getMesh(meshstr) : model_smgr->getMesh(meshstr.c_str());'''
           new = '''scene::IAnimatedMesh *mesh = nullptr;
 \tif (m_client) {
 \t\tmesh = m_client->getMesh(meshstr);
@@ -48,10 +42,21 @@ jobs:
 \t\t\tfile->drop();
 \t\t}
 \t}'''
-          s, count = pattern.subn(new, s, count=1)
-          if count != 1:
-              raise SystemExit('model mesh block not found')
+          if old in s:
+              s = s.replace(old, new, 1)
+          elif 'model_smgr->getMesh(meshstr.c_str())' in s:
+              raise SystemExit('GUI model mesh call has unexpected surrounding code')
           cpp.write_text(s)
+
+          cmake = Path('CMakeLists.txt')
+          s = cmake.read_text()
+          marker = '''\tif(lto_supported)\n\t\tset(CMAKE_INTERPROCEDURAL_OPTIMIZATION TRUE)\n\t\tmessage(STATUS "LTO/IPO is enabled")'''
+          replacement = '''\tif(lto_supported)\n\t\tset(CMAKE_INTERPROCEDURAL_OPTIMIZATION TRUE)\n\n\t\t# CMake's Clang IPO configuration can select gold, which is unavailable\n\t\t# in modern Android NDKs. Use lld for Android while keeping LTO enabled.\n\t\tif(ANDROID)\n\t\t\tstring(REPLACE "-fuse-ld=gold" "-fuse-ld=lld"\n\t\t\t\tCMAKE_C_LINK_OPTIONS_IPO "${CMAKE_C_LINK_OPTIONS_IPO}")\n\t\t\tstring(REPLACE "-fuse-ld=gold" "-fuse-ld=lld"\n\t\t\t\tCMAKE_CXX_LINK_OPTIONS_IPO "${CMAKE_CXX_LINK_OPTIONS_IPO}")\n\t\tendif()\n\n\t\tmessage(STATUS "LTO/IPO is enabled")'''
+          if marker in s and 'CMAKE_CXX_LINK_OPTIONS_IPO' not in s:
+              s = s.replace(marker, replacement, 1)
+          elif 'CMAKE_CXX_LINK_OPTIONS_IPO' not in s:
+              raise SystemExit('CMake LTO insertion point not found')
+          cmake.write_text(s)
           PY
 
       - name: Commit repair
@@ -59,6 +64,6 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           rm -f .github/workflows/repair_gui_compile.yml
-          git add src/gui/guiFormSpecMenu.h src/gui/guiFormSpecMenu.cpp .github/workflows/repair_gui_compile.yml
-          git commit -m 'Fix GUI model compile errors' || exit 0
+          git add CMakeLists.txt src/gui/guiFormSpecMenu.h src/gui/guiFormSpecMenu.cpp .github/workflows/repair_gui_compile.yml
+          git commit -m 'Fix Android LTO linker selection' || exit 0
           git push
