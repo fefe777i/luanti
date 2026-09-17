@@ -16,7 +16,24 @@ jobs:
           bash apply_multiworld.sh
           bash apply_multiworld_mapdb.sh
           bash apply_multiworld_serverdb.sh
-      - name: Repair GUI compile errors
+      - name: Repair Multiworld duplicate declarations
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('src/script/lua_api/l_server.h')
+          lines = p.read_text().splitlines(True)
+          seen = set()
+          out = []
+          for line in lines:
+              if 'static int l_' in line and 'lua_State *L' in line:
+                  key = line.strip()
+                  if key in seen:
+                      continue
+                  seen.add(key)
+              out.append(line)
+          p.write_text(''.join(out))
+          PY
+a      - name: Repair GUI compile errors
         run: |
           python3 - <<'PY'
           from pathlib import Path
