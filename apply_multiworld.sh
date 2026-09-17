@@ -35,8 +35,35 @@ patch('src/server.cpp', 'u16 Server::getProtocolVersionMin()\n', '''bool Server:
 \t\treturn false;
 \tif (!fs::CreateDir(path))
 \t\treturn false;
+\n\t// Pick a block-space offset that is isolated from the main world and
+\t// from every already-created subworld. Keep it inside s16 block range.
+\ts16 offset = 12500;
+\tfor (const auto &node : fs::GetDirListing(m_path_world)) {
+\t\tif (!node.dir || node.name.empty() || node.name[0] == '.' || node.name == name)
+\t\t\tcontinue;
+\t\tconst std::string mt = m_path_world + DIR_DELIM + node.name + DIR_DELIM + "world.mt";
+\t\tSettings conf;
+\t\tif (!conf.readConfigFile(mt.c_str()) || !conf.exists("subworld_offset_x"))
+\t\t\tcontinue;
+\t\ts16 used = conf.getS16("subworld_offset_x");
+\t\tif (std::abs((int)used - (int)offset) <= 6000)
+\t\t\toffset = (s16)(offset + 12500);
+\t}
+\n\tif (offset <= 0 || offset > 30000) {
+\t\tfs::DeleteSingleFileOrEmptyDirectory(path, true);
+\t\treturn false;
+\t}
 \n\tconst std::string worldmt = path + DIR_DELIM + "world.mt";
-\treturn fs::safeWriteToFile(worldmt, "gameid = minetest\\n");
+\tstd::ostringstream conf;
+\tconf << "gameid = minetest\\n"
+\t\t  << "backend = sqlite3\\n"
+\t\t  << "subworld = true\\n"
+\t\t  << "subworld_offset_x = " << offset << "\\n";
+\tif (!fs::safeWriteToFile(worldmt, conf.str())) {
+\t\tfs::DeleteSingleFileOrEmptyDirectory(path, true);
+\t\treturn false;
+\t}
+\n\treturn m_env->getServerMap().createSubWorldDatabase(name, offset);
 }
 \nvoid Server::transferPlayer(const std::string &playername,
 \t\tconst std::string &subworld_name, v3f pos)
@@ -57,7 +84,15 @@ patch('src/server.cpp', 'u16 Server::getProtocolVersionMin()\n', '''bool Server:
 \n\tauto &state = m_player_subworld_states[playername];
 \tstate.positions[state.current_subworld] = sao->getBasePosition();
 \tstate.current_subworld = subworld_name;
-\tstate.positions[subworld_name] = pos;
+\n\tif (subworld_name != "overworld") {
+\t\tSettings conf;
+\t\tconst std::string mt = m_path_world + DIR_DELIM + subworld_name + DIR_DELIM + "world.mt";
+\t\tif (!conf.readConfigFile(mt.c_str()) || !conf.exists("subworld_offset_x"))
+\t\t\treturn;
+\t\ts16 offset = conf.getS16("subworld_offset_x");
+\t\tpos.X += (f32)offset * MAP_BLOCKSIZE;
+\t}
+\n\tstate.positions[subworld_name] = pos;
 \tsao->setBasePosition(pos);
 }
 \nstd::string Server::getPlayerSubWorld(const std::string &playername)
