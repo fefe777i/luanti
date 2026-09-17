@@ -21,7 +21,7 @@ def patch(path, old, new, label):
 
 patch('src/server.h', '#include "server/clientiface.h"\n', '#include "server/clientiface.h"\n#include "subworld.h"\n', 'server.h include')
 patch('src/server.h', '\tstd::vector<std::pair<std::string, std::string>> m_mapgen_init_files;\n', '\tstd::vector<std::pair<std::string, std::string>> m_mapgen_init_files;\n\n\tstd::unordered_map<std::string, PlayerSubWorldState> m_player_subworld_states;\n', 'server.h state member')
-patch('src/server.h', '\tstd::string getWorldPath() const override { return m_path_world; }\n', '\tstd::string getWorldPath() const override { return m_path_world; }\n\n\t// === Multiworld ===\n\tbool createSubWorld(const std::string &name);\n\tvoid transferPlayer(const std::string &playername, const std::string &subworld_name, v3f pos);\n\tstd::string getPlayerSubWorld(const std::string &playername);\n\tstd::vector<std::string> listSubWorlds();\n', 'server.h Multiworld API')
+patch('src/server.h', '\tstd::string getWorldPath() const override { return m_path_world; }\n', '\tstd::string getWorldPath() const override { return m_path_world; }\n\n\t// === Multiworld ===\n\tbool createSubWorld(const std::string &name);\n\tbool transferPlayer(const std::string &playername, const std::string &subworld_name, v3f pos);\n\tstd::string getPlayerSubWorld(const std::string &playername);\n\tstd::vector<std::string> listSubWorlds();\n', 'server.h Multiworld API')
 patch('src/script/lua_api/l_server.h', '\t// serialize_roundtrip(obj)\n\tstatic int l_serialize_roundtrip(lua_State *L);\n', '\t// serialize_roundtrip(obj)\n\tstatic int l_serialize_roundtrip(lua_State *L);\n\n\t// create_subworld(name)\n\tstatic int l_create_subworld(lua_State *L);\n\n\t// transfer_player(name, subworld_name, pos)\n\tstatic int l_transfer_player(lua_State *L);\n\n\t// get_player_subworld(name)\n\tstatic int l_get_player_subworld(lua_State *L);\n\n\t// list_subworlds()\n\tstatic int l_list_subworlds(lua_State *L);\n', 'l_server.h declarations')
 patch('src/server.cpp', 'u16 Server::getProtocolVersionMin()\n', '''bool Server::createSubWorld(const std::string &name)
 {
@@ -35,9 +35,7 @@ patch('src/server.cpp', 'u16 Server::getProtocolVersionMin()\n', '''bool Server:
 \t\treturn false;
 \tif (!fs::CreateDir(path))
 \t\treturn false;
-\n\t// Pick a block-space offset that is isolated from the main world and
-\t// from every already-created subworld. Keep it inside s16 block range.
-\ts16 offset = 12500;
+\n\ts16 offset = 12500;
 \tfor (const auto &node : fs::GetDirListing(m_path_world)) {
 \t\tif (!node.dir || node.name.empty() || node.name[0] == '.' || node.name == name)
 \t\t\tcontinue;
@@ -65,7 +63,7 @@ patch('src/server.cpp', 'u16 Server::getProtocolVersionMin()\n', '''bool Server:
 \t}
 \n\treturn m_env->getServerMap().createSubWorldDatabase(name, offset);
 }
-\nvoid Server::transferPlayer(const std::string &playername,
+\n\nbool Server::transferPlayer(const std::string &playername,
 \t\tconst std::string &subworld_name, v3f pos)
 {
 \tPlayerSAO *sao = nullptr;
@@ -77,10 +75,10 @@ patch('src/server.cpp', 'u16 Server::getProtocolVersionMin()\n', '''bool Server:
 \t\t}
 \t}
 \tif (!sao)
-\t\treturn;
+\t\treturn false;
 \n\tif (subworld_name != "overworld" &&
 \t\t!isSubWorldDir(m_path_world + DIR_DELIM + subworld_name))
-\t\treturn;
+\t\treturn false;
 \n\tauto &state = m_player_subworld_states[playername];
 \tstate.positions[state.current_subworld] = sao->getBasePosition();
 \tstate.current_subworld = subworld_name;
@@ -88,12 +86,13 @@ patch('src/server.cpp', 'u16 Server::getProtocolVersionMin()\n', '''bool Server:
 \t\tSettings conf;
 \t\tconst std::string mt = m_path_world + DIR_DELIM + subworld_name + DIR_DELIM + "world.mt";
 \t\tif (!conf.readConfigFile(mt.c_str()) || !conf.exists("subworld_offset_x"))
-\t\t\treturn;
+\t\t\treturn false;
 \t\ts16 offset = conf.getS16("subworld_offset_x");
 \t\tpos.X += (f32)offset * MAP_BLOCKSIZE;
 \t}
 \n\tstate.positions[subworld_name] = pos;
 \tsao->setBasePosition(pos);
+\treturn true;
 }
 \nstd::string Server::getPlayerSubWorld(const std::string &playername)
 {
@@ -128,8 +127,8 @@ patch('src/script/lua_api/l_server.cpp', 'void ModApiServer::Initialize(lua_Stat
 \tstd::string pname = luaL_checkstring(L, 1);
 \tstd::string swname = luaL_checkstring(L, 2);
 \tv3f pos = check_v3f(L, 3);
-\tgetServer(L)->transferPlayer(pname, swname, pos);
-\treturn 0;
+\tlua_pushboolean(L, getServer(L)->transferPlayer(pname, swname, pos));
+\treturn 1;
 }
 \nint ModApiServer::l_get_player_subworld(lua_State *L)
 {
