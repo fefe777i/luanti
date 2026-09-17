@@ -33,11 +33,10 @@ jobs:
               out.append(line)
           p.write_text(''.join(out))
           PY
-a      - name: Repair GUI compile errors
+      - name: Repair GUI compile errors
         run: |
           python3 - <<'PY'
           from pathlib import Path
-
           h = Path('src/gui/guiFormSpecMenu.h')
           s = h.read_text()
           bad = 'namespace irr {\nnamespace scene {\nclass ISceneManager;\n}\n}\n'
@@ -54,7 +53,6 @@ a      - name: Repair GUI compile errors
         run: |
           python3 - <<'PY'
           from pathlib import Path
-
           p = Path('src/gui/guiFormSpecMenu.cpp')
           s = p.read_text()
           old = 'scene::IAnimatedMesh *mesh = m_client ?\n\t\t\tm_client->getMesh(meshstr) :\n\t\t\tmodel_smgr->getMesh(meshstr.c_str());'
