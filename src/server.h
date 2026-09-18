@@ -14,6 +14,7 @@
 #include "util/basic_macros.h"
 #include "util/metricsbackend.h"
 #include "server/clientiface.h"
+#include "subworld.h"
 #include "threading/ordered_mutex.h"
 #include "translation.h"
 #include "sound_spec.h"
@@ -346,6 +347,11 @@ public:
 	const SubgameSpec* getGameSpec() const override { return &m_gamespec; }
 	static std::string getBuiltinLuaPath();
 	std::string getWorldPath() const override { return m_path_world; }
+
+	bool createSubWorld(const std::string &name);
+	bool transferPlayer(const std::string &playername, const std::string &subworld_name, v3f pos);
+	std::string getPlayerSubWorld(const std::string &playername);
+	std::vector<std::string> listSubWorlds();
 	std::string getModDataPath() const override { return m_path_mod_data; }
 	ModIPCStore *getModIPCStore() override { return &m_ipcstore; }
 
@@ -463,6 +469,8 @@ public:
 	std::vector<std::pair<std::string, std::string>> m_async_init_files;
 	// Identical but for mapgen env
 	std::vector<std::pair<std::string, std::string>> m_mapgen_init_files;
+
+	std::unordered_map<std::string, PlayerSubWorldState> m_player_subworld_states;
 
 	// Data transferred into other Lua envs at init time
 	std::unique_ptr<PackedValue> m_lua_globals_data;
