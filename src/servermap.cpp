@@ -46,7 +46,7 @@
 MapDatabase *MapDatabaseAccessor::getDatabase(v3s16 blockpos)
 {
 	for (auto &entry : subworld_dbs) {
-		if (std::abs((int)blockpos.X - (int)entry.first) <= 6000)
+		if (std::abs((int)blockpos.X - (int)entry.first) <= 900)
 			return entry.second;
 	}
 	return dbase;
