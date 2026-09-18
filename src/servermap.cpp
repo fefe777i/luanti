@@ -735,6 +735,25 @@ bool ServerMap::createSubWorldDatabase(const std::string &name, s16 offset_x)
 	return true;
 }
 
+void ServerMap::switchSubWorldCache()
+{
+	// Persist the current world's modified blocks before removing its cache.
+	if (m_map_saving_enabled)
+		save(MOD_STATE_WRITE_AT_UNLOAD);
+
+	// A ServerMap normally keeps all loaded sectors in one memory cache.
+	// Multiworld must not leave blocks from the previous world in that cache.
+	std::vector<v2s16> sectors;
+	sectors.reserve(m_sectors.size());
+	for (const auto &entry : m_sectors)
+		sectors.push_back(entry.first);
+	deleteSectors(sectors);
+	m_detached_blocks.clear();
+
+	// Drop pending map-generation state for the previous world's coordinates.
+	m_emerge->resetMap();
+}
+
 void ServerMap::beginSave()
 {
 	MutexAutoLock dblock(m_db.mutex);
