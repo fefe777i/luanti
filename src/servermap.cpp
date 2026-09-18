@@ -737,7 +737,10 @@ bool ServerMap::createSubWorldDatabase(const std::string &name, s16 offset_x)
 
 void ServerMap::switchSubWorldCache()
 {
-	// Persist the current world's modified blocks before removing its cache.
+	// Emerge threads may still be using the current map database.
+	// Stop them before replacing the in-memory map/cache.
+	m_emerge->stopThreads();
+
 	if (m_map_saving_enabled)
 		save(MOD_STATE_WRITE_AT_UNLOAD);
 
@@ -750,8 +753,11 @@ void ServerMap::switchSubWorldCache()
 	deleteSectors(sectors);
 	m_detached_blocks.clear();
 
-	// Drop pending map-generation state for the previous world's coordinates.
+	// Rebind EmergeManager to the same accessor after its old map binding
+	// has been safely released, then resume generation for the new world.
 	m_emerge->resetMap();
+	m_emerge->initMap(&m_db);
+	m_emerge->startThreads();
 }
 
 void ServerMap::beginSave()
