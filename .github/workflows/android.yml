@@ -16,6 +16,7 @@ jobs:
           bash apply_multiworld.sh
           bash apply_multiworld_mapdb.sh
           bash apply_multiworld_serverdb.sh
+          bash apply_multiworld_teleport.sh
       - name: Repair Multiworld duplicate declarations
         run: |
           python3 - <<'PY'
