@@ -4653,7 +4653,7 @@ bool Server::switchWorld(const std::string &name)
 		return false;
 
 	const std::string switch_file = current_root + DIR_DELIM + ".luanti_world_switch";
-	if (!fs::safeWriteToFile(switch_file, name + "\\n"))
+	if (!fs::safeWriteToFile(switch_file, name + "\n"))
 		return false;
 
 	requestShutdown("Перемикання світу...", true, 0.0f);
