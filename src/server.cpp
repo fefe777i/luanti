@@ -4536,7 +4536,16 @@ bool Server::createSubWorld(const std::string &name)
 		name.find('/') != std::string::npos || name.find('\\') != std::string::npos)
 		return false;
 	const std::string path = m_path_world + DIR_DELIM + name;
-	if (isSubWorldDir(path)) return true;
+	if (isSubWorldDir(path)) {
+		Settings old_conf;
+		const std::string mt = path + DIR_DELIM + "world.mt";
+		if (old_conf.readConfigFile(mt.c_str()) && old_conf.exists("subworld_offset_x") &&
+				std::abs((int)old_conf.getS16("subworld_offset_x")) > 2400) {
+			old_conf.setS16("subworld_offset_x", 1200);
+			old_conf.updateConfigFile(mt.c_str());
+		}
+		return true;
+	}
 	if (fs::PathExists(path)) return false;
 	if (!fs::CreateDir(path)) return false;
 	// Keep the physical map position inside Luanti's signed-16-bit mapblock range.
