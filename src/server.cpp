@@ -389,7 +389,14 @@ Server::~Server()
 {
 	{
 		std::lock_guard<std::mutex> lock(s_multiworld_mutex);
-		if (!m_world_name.empty()) s_worlds.erase(m_world_name);
+		for (auto it = s_peer_worlds.begin(); it != s_peer_worlds.end();) {
+			if (it->second == this)
+				it = s_peer_worlds.erase(it);
+			else
+				++it;
+		}
+		if (!m_world_name.empty())
+			s_worlds.erase(m_world_name);
 	}
 	// Send shutdown message
 	SendChatMessage(PEER_ID_INEXISTENT, ChatMessage(CHATMESSAGE_TYPE_ANNOUNCE,
