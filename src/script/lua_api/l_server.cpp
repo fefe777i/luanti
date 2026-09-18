@@ -716,6 +716,14 @@ int ModApiServer::l_list_subworlds(lua_State *L)
 	return 1;
 }
 
+int ModApiServer::l_switch_world(lua_State *L)
+{
+	NO_MAP_LOCK_REQUIRED;
+	std::string name = luaL_checkstring(L, 1);
+	lua_pushboolean(L, getServer(L)->switchWorld(name));
+	return 1;
+}
+
 void ModApiServer::Initialize(lua_State *L, int top)
 {
 	API_FCT(request_shutdown);
@@ -759,6 +767,7 @@ void ModApiServer::Initialize(lua_State *L, int top)
 	API_FCT(transfer_player);
 	API_FCT(get_player_subworld);
 	API_FCT(list_subworlds);
+	API_FCT(switch_world);
 
 	API_FCT(register_mapgen_script);
 }
