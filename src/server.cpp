@@ -4655,7 +4655,13 @@ std::string Server::getPlayerSubWorld(const std::string &playername)
 
 bool Server::switchWorld(const std::string &name)
 {
-	return transferPlayer(getPlayerName(PEER_ID_INEXISTENT), name, v3f());
+	auto ids = m_clients.getClientIDs(CS_Active);
+	if (ids.size() != 1)
+		return false;
+	RemoteClient *client = getClient(ids.front());
+	if (!client)
+		return false;
+	return transferPlayer(client->getName(), name, v3f());
 }
 
 std::vector<std::string> Server::listSubWorlds()
