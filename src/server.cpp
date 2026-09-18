@@ -4619,6 +4619,9 @@ bool Server::transferPlayer(const std::string &playername, const std::string &su
 		physical_pos.X += (f32)conf.getS16("subworld_offset_x") * MAP_BLOCKSIZE;
 	}
 
+	if (from != subworld_name)
+		m_env->getServerMap().switchSubWorldCache();
+
 	state.current_subworld = subworld_name;
 	state.positions[subworld_name] = pos;
 	sao->setBasePosition(physical_pos);
