@@ -114,6 +114,7 @@ public:
 	static std::vector<std::string> getDatabaseBackends();
 	static MapDatabase *createDatabase(const std::string &name, const std::string &savedir, Settings &conf);
 	bool createSubWorldDatabase(const std::string &name, s16 offset_x);
+	void switchSubWorldCache();
 
 	// Call these before and after saving of blocks
 	void beginSave() override;
