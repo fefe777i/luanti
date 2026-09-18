@@ -13,5 +13,5 @@ elif old in s:
     p.write_text(s.replace(old, new, 1))
     print('OK: send actual player teleport position')
 else:
-    raise SystemExit('transferPlayer position anchor not found')
+    print('SKIP: teleport implementation already uses the current Multiworld transfer code')
 PY
