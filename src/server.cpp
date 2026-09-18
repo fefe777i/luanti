@@ -76,6 +76,12 @@
 #include <sstream>
 #include <csignal>
 
+std::unordered_map<std::string, Server*> Server::s_worlds;
+std::unordered_map<session_t, Server*> Server::s_peer_worlds;
+std::unordered_map<std::string, std::string> Server::s_player_worlds;
+std::string Server::s_player_worlds_path;
+std::mutex Server::s_multiworld_mutex;
+
 class ClientNotFoundException : public BaseException
 {
 public:
@@ -153,7 +159,10 @@ void *ServerThread::run()
 
 			const float remaining_time = step_settings.steplen
 					- 1e-6f * (porting::getTimeUs() - t0);
-			m_server->Receive(remaining_time);
+			if (m_server->isNetworkOwner())
+				m_server->Receive(remaining_time);
+			else if (remaining_time > 0.0f)
+				sleep_ms((u32)(remaining_time * 1000.0f));
 
 		} catch (con::PeerNotFoundException &e) {
 			infostream<<"Server: PeerNotFoundException"<<std::endl;
@@ -288,14 +297,17 @@ Server::Server(
 		Address bind_addr,
 		bool dedicated,
 		ChatInterface *iface,
-		std::string *shutdown_errmsg
+		std::string *shutdown_errmsg,
+		std::shared_ptr<con::IConnection> shared_con,
+		bool network_owner,
+		std::string world_name
 	):
 	m_bind_addr(bind_addr),
 	m_path_world(path_world),
 	m_gamespec(gamespec),
 	m_simple_singleplayer_mode(simple_singleplayer_mode),
 	m_dedicated(dedicated),
-	m_con(con::createMTP(CONNECTION_TIMEOUT, m_bind_addr.isIPv6(), this)),
+	m_con(shared_con ? shared_con : con::createMTP(CONNECTION_TIMEOUT, m_bind_addr.isIPv6(), this)),
 	m_itemdef(createItemDefManager()),
 	m_nodedef(createNodeDefManager()),
 	m_craftdef(createCraftDefManager()),
@@ -303,6 +315,8 @@ Server::Server(
 	m_clients(m_con),
 	m_admin_chat(iface),
 	m_shutdown_errmsg(shutdown_errmsg),
+	m_network_owner(network_owner),
+	m_world_name(std::move(world_name)),
 	m_modchannel_mgr(new ModChannelMgr())
 {
 	if (m_path_world.empty())
@@ -310,6 +324,16 @@ Server::Server(
 
 	if (!gamespec.isValid())
 		throw ServerError("Supplied invalid gamespec");
+
+	if (!m_world_name.empty()) {
+		std::lock_guard<std::mutex> lock(s_multiworld_mutex);
+		s_worlds[m_world_name] = this;
+		if (s_player_worlds_path.empty()) {
+			const std::string root = fs::RemoveLastPathComponent(m_path_world);
+			s_player_worlds_path = root + DIR_DELIM + ".multiworld_players";
+			loadPlayerWorlds(s_player_worlds_path);
+		}
+	}
 
 #if USE_PROMETHEUS
 	if (!simple_singleplayer_mode) {
@@ -609,8 +633,9 @@ void Server::start()
 	// Stop thread if already running
 	m_thread->stop();
 
-	// Initialize connection
-	m_con->Serve(m_bind_addr);
+	// Initialize connection only for the network owner.
+	if (m_network_owner)
+		m_con->Serve(m_bind_addr);
 
 	// Start thread
 	m_thread->start();
@@ -4530,143 +4555,156 @@ bool Server::migrateModStorageDatabase(const GameParams &game_params, const Sett
 	return succeeded;
 }
 
-bool Server::createSubWorld(const std::string &name)
+void Server::loadPlayerWorlds(const std::string &path)
 {
-	if (name.empty() || name == "." || name == ".." || name == "overworld" ||
-		name.find('/') != std::string::npos || name.find('\\') != std::string::npos)
-		return false;
-	const std::string path = m_path_world + DIR_DELIM + name;
-	if (isSubWorldDir(path)) {
-		Settings old_conf;
-		const std::string mt = path + DIR_DELIM + "world.mt";
-		if (old_conf.readConfigFile(mt.c_str()) && old_conf.exists("subworld_offset_x") &&
-				std::abs((int)old_conf.getS16("subworld_offset_x")) > 2400) {
-			old_conf.setS16("subworld_offset_x", 1200);
-			old_conf.updateConfigFile(mt.c_str());
-		}
-		return true;
-	}
-	if (fs::PathExists(path)) return false;
-	if (!fs::CreateDir(path)) return false;
-	// Keep the physical map position inside Luanti's signed-16-bit mapblock range.
-	// 1200 blocks = 19200 nodes, leaving room around the origin.
-	s16 offset = 1200;
-	for (const auto &node : fs::GetDirListing(m_path_world)) {
-		if (!node.dir || node.name.empty() || node.name[0] == '.' || node.name == name)
-			continue;
-		const std::string mt = m_path_world + DIR_DELIM + node.name + DIR_DELIM + "world.mt";
-		Settings conf;
-		if (!conf.readConfigFile(mt.c_str()) || !conf.exists("subworld_offset_x"))
-			continue;
-		s16 used = conf.getS16("subworld_offset_x");
-		if (std::abs((int)used - (int)offset) < 900)
-			offset = (s16)(offset + 1200);
-	}
-	if (offset <= 0 || offset > 2400) {
-		fs::DeleteSingleFileOrEmptyDirectory(path, true);
-		return false;
-	}
-	const std::string worldmt = path + DIR_DELIM + "world.mt";
-	std::ostringstream conf;
-	conf << "gameid = minetest\n"
-		  << "backend = sqlite3\n"
-		  << "subworld = true\n"
-		  << "subworld_offset_x = " << offset << "\n";
-	if (!fs::safeWriteToFile(worldmt, conf.str())) {
-		fs::DeleteSingleFileOrEmptyDirectory(path, true);
-		return false;
-	}
-	return m_env->getServerMap().createSubWorldDatabase(name, offset);
+	std::ifstream in(path);
+	std::string player, world;
+	while (in >> player >> world)
+		s_player_worlds[player] = world;
 }
 
-bool Server::transferPlayer(const std::string &playername, const std::string &subworld_name, v3f pos)
+void Server::savePlayerWorlds()
 {
-	PlayerSAO *sao = nullptr;
-	for (session_t peer_id : m_clients.getClientIDs()) {
-		RemoteClient *client = getClient(peer_id);
-		if (client && client->getName() == playername) {
-			sao = getPlayerSAO(peer_id);
-			break;
+	if (s_player_worlds_path.empty())
+		return;
+	std::ostringstream out;
+	for (const auto &it : s_player_worlds)
+		out << it.first << " " << it.second << "\\n";
+	fs::safeWriteToFile(s_player_worlds_path, out.str());
+}
+
+Server *Server::findWorld(const std::string &name)
+{
+	auto it = s_worlds.find(name);
+	return it == s_worlds.end() ? nullptr : it->second;
+}
+
+void Server::routePacket(NetworkPacket *pkt)
+{
+	Server *target = nullptr;
+	{
+		std::lock_guard<std::mutex> lock(s_multiworld_mutex);
+		auto it = s_peer_worlds.find(pkt->getPeerId());
+		target = it == s_peer_worlds.end() ? this : it->second;
+
+		if (pkt->getCommand() == TOSERVER_INIT) {
+			try {
+				NetworkPacket probe = *pkt;
+				u8 max_ser_ver;
+				u16 unused, min_proto, max_proto;
+				std::string playername;
+				probe.seek(0);
+				probe >> max_ser_ver >> unused >> min_proto >> max_proto >> playername;
+				auto wit = s_player_worlds.find(playername);
+				if (wit != s_player_worlds.end()) {
+					Server *mapped = findWorld(wit->second);
+					if (mapped)
+						target = mapped;
+				}
+				if (target != this) {
+					m_clients.DeleteClient(pkt->getPeerId());
+					target->m_clients.CreateClient(pkt->getPeerId());
+					s_peer_worlds[pkt->getPeerId()] = target;
+				}
+			} catch (const std::exception &) {
+			}
 		}
 	}
-	if (!sao)
-		return false;
-	if (subworld_name != "overworld" &&
-		!isSubWorldDir(m_path_world + DIR_DELIM + subworld_name))
-		return false;
 
-	auto &state = m_player_subworld_states[playername];
-	const std::string from = state.current_subworld.empty() ? "overworld" : state.current_subworld;
+	target->ProcessData(pkt);
+}
 
-	// Save the player's local position in the current world.
-	v3f local_pos = sao->getBasePosition();
-	if (from != "overworld") {
-		Settings from_conf;
-		const std::string from_mt = m_path_world + DIR_DELIM + from + DIR_DELIM + "world.mt";
-		if (!from_conf.readConfigFile(from_mt.c_str()) || !from_conf.exists("subworld_offset_x"))
-			return false;
-		local_pos.X -= (f32)from_conf.getS16("subworld_offset_x") * MAP_BLOCKSIZE;
+void Server::Receive(float min_time)
+{
+	ZoneScoped;
+	auto framemarker = FrameMarker("Server::Receive()-frame").started();
+	const u64 t0 = porting::getTimeUs();
+	const float min_time_us = min_time * 1e6f;
+	auto remaining_time_us = [&]() -> float {
+		return std::max(0.0f, min_time_us - (porting::getTimeUs() - t0));
+	};
+
+	NetworkPacket pkt;
+	session_t peer_id;
+	for (;;) {
+		pkt.clear();
+		peer_id = 0;
+		try {
+			const u32 cur_timeout_ms = std::ceil(remaining_time_us() / 1000.0f);
+			if (!m_con->ReceiveTimeoutMs(&pkt, cur_timeout_ms)) {
+				if (remaining_time_us() > 0.0f)
+					continue;
+				break;
+			}
+			peer_id = pkt.getPeerId();
+			m_packet_recv_counter->increment();
+			routePacket(&pkt);
+			m_packet_recv_processed_counter->increment();
+		} catch (const con::InvalidIncomingDataException &e) {
+			infostream << "Server::Receive(): InvalidIncomingDataException: what()=" << e.what() << std::endl;
+		} catch (SerializationError &e) {
+			enrich_exception(e, pkt, true);
+			infostream << "Server::Receive(): SerializationError: what()=" << e.what() << std::endl;
+		} catch (PacketError &e) {
+			enrich_exception(e, pkt, false);
+			actionstream << "Server::Receive(): PacketError: what()=" << e.what() << std::endl;
+		} catch (const ClientStateError &e) {
+			errorstream << "ClientStateError: peer=" << peer_id << " what()=" << e.what() << std::endl;
+			DenyAccess(peer_id, SERVER_ACCESSDENIED_UNEXPECTED_DATA);
+		} catch (con::PeerNotFoundException &) {
+			infostream << "Server: PeerNotFoundException" << std::endl;
+		} catch (ClientNotFoundException &) {
+			infostream << "Server: ClientNotFoundException" << std::endl;
+		}
 	}
-	state.positions[from] = local_pos;
+}
 
-	// Convert the requested local position into the physical map position.
-	v3f physical_pos = pos;
-	if (subworld_name != "overworld") {
-		Settings conf;
-		const std::string mt = m_path_world + DIR_DELIM + subworld_name + DIR_DELIM + "world.mt";
-		if (!conf.readConfigFile(mt.c_str()) || !conf.exists("subworld_offset_x"))
+bool Server::createSubWorld(const std::string &name)
+{
+	std::lock_guard<std::mutex> lock(s_multiworld_mutex);
+	return findWorld(name) != nullptr;
+}
+
+bool Server::transferPlayer(const std::string &playername, const std::string &subworld_name, v3f)
+{
+	std::lock_guard<std::mutex> lock(s_multiworld_mutex);
+	if (!findWorld(subworld_name))
+		return false;
+	if (!findWorld(s_player_worlds[playername])) {
+		// Allow switching the currently connected player even if no mapping existed yet.
+		if (!m_env->getPlayer(playername))
 			return false;
-		physical_pos.X += (f32)conf.getS16("subworld_offset_x") * MAP_BLOCKSIZE;
 	}
-
-	if (from != subworld_name)
-		m_env->getServerMap().switchSubWorldCache();
-
-	state.current_subworld = subworld_name;
-	state.positions[subworld_name] = pos;
-	sao->setBasePosition(physical_pos);
-	sao->setPos(physical_pos);
+	s_player_worlds[playername] = subworld_name;
+	savePlayerWorlds();
+	RemotePlayer *player = m_env->getPlayer(playername);
+	if (!player || player->getPeerId() == PEER_ID_INEXISTENT)
+		return true;
+	DenyAccess(player->getPeerId(), SERVER_ACCESSDENIED_SHUTDOWN, "Switching world", true);
 	return true;
 }
 
 std::string Server::getPlayerSubWorld(const std::string &playername)
 {
-	auto it = m_player_subworld_states.find(playername);
-	return it == m_player_subworld_states.end() ? "overworld" : it->second.current_subworld;
+	std::lock_guard<std::mutex> lock(s_multiworld_mutex);
+	auto it = s_player_worlds.find(playername);
+	if (it != s_player_worlds.end())
+		return it->second;
+	return m_world_name.empty() ? "world1" : m_world_name;
 }
 
 bool Server::switchWorld(const std::string &name)
 {
-	if (name.empty() || name == "." || name == ".." ||
-		name.find('/') != std::string::npos || name.find('\\\\') != std::string::npos)
-		return false;
-
-	const std::string current_root = fs::RemoveLastPathComponent(m_path_world);
-	if (current_root.empty())
-		return false;
-
-	const std::string target = current_root + DIR_DELIM + name;
-	if (target == m_path_world)
-		return true;
-
-	if (!fs::PathExists(target) && !fs::CreateDir(target))
-		return false;
-
-	const std::string switch_file = current_root + DIR_DELIM + ".luanti_world_switch";
-	if (!fs::safeWriteToFile(switch_file, name + "\n"))
-		return false;
-
-	requestShutdown("Перемикання світу...", true, 0.0f);
-	return true;
+	return transferPlayer(getPlayerName(PEER_ID_INEXISTENT), name, v3f());
 }
 
 std::vector<std::string> Server::listSubWorlds()
 {
-	std::vector<std::string> result{"overworld"};
-	for (const auto &node : fs::GetDirListing(m_path_world)) {
-		if (!node.dir || node.name.empty() || node.name[0] == '.' || node.name == "overworld") continue;
-		if (isSubWorldDir(m_path_world + DIR_DELIM + node.name)) result.push_back(node.name);
-	}
+	std::lock_guard<std::mutex> lock(s_multiworld_mutex);
+	std::vector<std::string> result;
+	for (const auto &it : s_worlds)
+		result.push_back(it.first);
+	std::sort(result.begin(), result.end());
 	return result;
 }
 
