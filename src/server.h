@@ -14,7 +14,6 @@
 #include "util/basic_macros.h"
 #include "util/metricsbackend.h"
 #include "server/clientiface.h"
-#include "subworld.h"
 #include "threading/ordered_mutex.h"
 #include "translation.h"
 #include "sound_spec.h"
@@ -189,7 +188,10 @@ public:
 		Address bind_addr,
 		bool dedicated,
 		ChatInterface *iface = nullptr,
-		std::string *shutdown_errmsg = nullptr
+		std::string *shutdown_errmsg = nullptr,
+		std::shared_ptr<con::IConnection> shared_con = nullptr,
+		bool network_owner = true,
+		std::string world_name = ""
 	);
 	~Server();
 	DISABLE_CLASS_COPY(Server);
@@ -205,6 +207,10 @@ public:
 	/// Receive and process all incoming packets. Sleep if the time goal isn't met.
 	/// @param min_time minimum time to take [s]
 	void Receive(float min_time);
+	void ProcessData(NetworkPacket *pkt);
+	std::shared_ptr<con::IConnection> getConnection() const { return m_con; }
+	bool isNetworkOwner() const { return m_network_owner; }
+	const std::string &getWorldName() const { return m_world_name; }
 	void yieldToOtherThreads(float dtime);
 
 	// Full player initialization after they processed all static media
@@ -243,8 +249,6 @@ public:
 	void handleCommand_HaveMedia(NetworkPacket *pkt);
 	void handleCommand_UpdateClientInfo(NetworkPacket *pkt);
 	void handleCommand_HudTouch(NetworkPacket *pkt);
-
-	void ProcessData(NetworkPacket *pkt);
 
 	void Send(NetworkPacket *pkt);
 	void Send(session_t peer_id, NetworkPacket *pkt);
@@ -348,7 +352,7 @@ public:
 	static std::string getBuiltinLuaPath();
 	std::string getWorldPath() const override { return m_path_world; }
 
-	bool createSubWorld(const std::string &name);
+ 	bool createSubWorld(const std::string &name);
 	bool transferPlayer(const std::string &playername, const std::string &subworld_name, v3f pos);
 	std::string getPlayerSubWorld(const std::string &playername);
 	std::vector<std::string> listSubWorlds();
@@ -471,13 +475,23 @@ public:
 	// Identical but for mapgen env
 	std::vector<std::pair<std::string, std::string>> m_mapgen_init_files;
 
-	std::unordered_map<std::string, PlayerSubWorldState> m_player_subworld_states;
-
 	// Data transferred into other Lua envs at init time
 	std::unique_ptr<PackedValue> m_lua_globals_data;
 
 	// Bind address
 	Address m_bind_addr;
+	bool m_network_owner = true;
+	std::string m_world_name;
+	static std::unordered_map<std::string, Server*> s_worlds;
+	static std::unordered_map<session_t, Server*> s_peer_worlds;
+	static std::unordered_map<std::string, std::string> s_player_worlds;
+	static std::string s_player_worlds_path;
+	static std::mutex s_multiworld_mutex;
+
+	static void loadPlayerWorlds(const std::string &path);
+	static void savePlayerWorlds();
+	static Server *findWorld(const std::string &name);
+	void routePacket(NetworkPacket *pkt);
 
 	// Public helper for taking the envlock in a scope
 	class EnvAutoLock {
