@@ -4635,6 +4635,31 @@ std::string Server::getPlayerSubWorld(const std::string &playername)
 	return it == m_player_subworld_states.end() ? "overworld" : it->second.current_subworld;
 }
 
+bool Server::switchWorld(const std::string &name)
+{
+	if (name.empty() || name == "." || name == ".." ||
+		name.find('/') != std::string::npos || name.find('\\\\') != std::string::npos)
+		return false;
+
+	const std::string current_root = fs::RemoveLastPathComponent(m_path_world);
+	if (current_root.empty())
+		return false;
+
+	const std::string target = current_root + DIR_DELIM + name;
+	if (target == m_path_world)
+		return true;
+
+	if (!fs::PathExists(target) && !fs::CreateDir(target))
+		return false;
+
+	const std::string switch_file = current_root + DIR_DELIM + ".luanti_world_switch";
+	if (!fs::safeWriteToFile(switch_file, name + "\\n"))
+		return false;
+
+	requestShutdown("Перемикання світу...", true, 0.0f);
+	return true;
+}
+
 std::vector<std::string> Server::listSubWorlds()
 {
 	std::vector<std::string> result{"overworld"};
