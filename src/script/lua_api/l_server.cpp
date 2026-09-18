@@ -680,6 +680,42 @@ int ModApiServer::l_serialize_roundtrip(lua_State *L)
 	return 1;
 }
 
+int ModApiServer::l_create_subworld(lua_State *L)
+{
+	NO_MAP_LOCK_REQUIRED;
+	std::string name = luaL_checkstring(L, 1);
+	lua_pushboolean(L, getServer(L)->createSubWorld(name));
+	return 1;
+}
+int ModApiServer::l_transfer_player(lua_State *L)
+{
+	NO_MAP_LOCK_REQUIRED;
+	std::string pname = luaL_checkstring(L, 1);
+	std::string swname = luaL_checkstring(L, 2);
+	v3f pos = check_v3f(L, 3);
+	lua_pushboolean(L, getServer(L)->transferPlayer(pname, swname, pos));
+	return 1;
+}
+int ModApiServer::l_get_player_subworld(lua_State *L)
+{
+	NO_MAP_LOCK_REQUIRED;
+	std::string pname = luaL_checkstring(L, 1);
+	lua_pushstring(L, getServer(L)->getPlayerSubWorld(pname).c_str());
+	return 1;
+}
+int ModApiServer::l_list_subworlds(lua_State *L)
+{
+	NO_MAP_LOCK_REQUIRED;
+	auto list = getServer(L)->listSubWorlds();
+	lua_newtable(L);
+	int i = 1;
+	for (const auto &name : list) {
+		lua_pushstring(L, name.c_str());
+		lua_rawseti(L, -2, i++);
+	}
+	return 1;
+}
+
 void ModApiServer::Initialize(lua_State *L, int top)
 {
 	API_FCT(request_shutdown);
@@ -719,6 +755,10 @@ void ModApiServer::Initialize(lua_State *L, int top)
 
 	API_FCT(register_async_dofile);
 	API_FCT(serialize_roundtrip);
+	API_FCT(create_subworld);
+	API_FCT(transfer_player);
+	API_FCT(get_player_subworld);
+	API_FCT(list_subworlds);
 
 	API_FCT(register_mapgen_script);
 }
