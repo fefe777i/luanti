@@ -90,12 +90,6 @@ void MapDatabaseAccessor::listAllLoadableBlocks(std::vector<v3s16> &dst)
 	if (dbase_ro) dbase_ro->listAllLoadableBlocks(dst);
 }
 
-{
-	ret.clear();
-	dbase->loadBlock(blockpos, &ret);
-	if (ret.empty() && dbase_ro)
-		dbase_ro->loadBlock(blockpos, &ret);
-}
 
 /*
 	ServerMap
