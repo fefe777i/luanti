@@ -37,59 +37,18 @@
 #if USE_POSTGRESQL
 #include "database/database-postgresql.h"
 #endif
-#include <cstdlib>
 
 /*
 	Helpers
 */
 
-MapDatabase *MapDatabaseAccessor::getDatabase(v3s16 blockpos)
-{
-	for (auto &entry : subworld_dbs) {
-		if (std::abs((int)blockpos.X - (int)entry.first) <= 900)
-			return entry.second;
-	}
-	return dbase;
-}
-
 void MapDatabaseAccessor::loadBlock(v3s16 blockpos, std::string &ret)
 {
 	ret.clear();
-	MapDatabase *db = getDatabase(blockpos);
-	db->loadBlock(blockpos, &ret);
-	if (ret.empty() && db == dbase && dbase_ro)
+	dbase->loadBlock(blockpos, &ret);
+	if (ret.empty() && dbase_ro)
 		dbase_ro->loadBlock(blockpos, &ret);
 }
-
-void MapDatabaseAccessor::saveBlock(v3s16 blockpos, const std::string &data)
-{
-	getDatabase(blockpos)->saveBlock(blockpos, data);
-}
-
-void MapDatabaseAccessor::deleteBlock(v3s16 blockpos)
-{
-	getDatabase(blockpos)->deleteBlock(blockpos);
-}
-
-void MapDatabaseAccessor::beginSave()
-{
-	dbase->beginSave();
-	for (auto &entry : subworld_dbs) entry.second->beginSave();
-}
-
-void MapDatabaseAccessor::endSave()
-{
-	for (auto &entry : subworld_dbs) entry.second->endSave();
-	dbase->endSave();
-}
-
-void MapDatabaseAccessor::listAllLoadableBlocks(std::vector<v3s16> &dst)
-{
-	dbase->listAllLoadableBlocks(dst);
-	for (auto &entry : subworld_dbs) entry.second->listAllLoadableBlocks(dst);
-	if (dbase_ro) dbase_ro->listAllLoadableBlocks(dst);
-}
-
 
 /*
 	ServerMap
@@ -118,18 +77,6 @@ ServerMap::ServerMap(const std::string &savedir, IGameDef *gamedef,
 	}
 	std::string backend = conf.get("backend");
 	m_db.dbase = createDatabase(backend, savedir, conf);
-
-	for (const auto &node : fs::GetDirListing(savedir)) {
-		if (!node.dir || node.name.empty() || node.name[0] == '.') continue;
-		std::string subpath = savedir + DIR_DELIM + node.name;
-		Settings subconf;
-		if (!subconf.readConfigFile((subpath + DIR_DELIM + "world.mt").c_str())) continue;
-		if (!subconf.exists("subworld") || !subconf.getBool("subworld")) continue;
-		if (!subconf.exists("subworld_offset_x")) continue;
-		s16 offset = subconf.getS16("subworld_offset_x");
-		m_db.subworld_dbs[offset] = createDatabase("sqlite3", subpath, subconf);
-	}
-
 	if (conf.exists("readonly_backend")) {
 		std::string readonly_dir = savedir + DIR_DELIM + "readonly";
 		m_db.dbase_ro = createDatabase(conf.get("readonly_backend"), readonly_dir, conf);
@@ -216,8 +163,6 @@ ServerMap::~ServerMap()
 
 	{
 		MutexAutoLock dblock(m_db.mutex);
-		for (auto &entry : m_db.subworld_dbs) delete entry.second;
-		m_db.subworld_dbs.clear();
 		delete m_db.dbase;
 		m_db.dbase = nullptr;
 		delete m_db.dbase_ro;
@@ -636,7 +581,7 @@ void ServerMap::save(ModifiedState save_level)
 void ServerMap::listAllLoadableBlocks(std::vector<v3s16> &dst)
 {
 	MutexAutoLock dblock(m_db.mutex);
-	m_db.listAllLoadableBlocks(dst);
+	m_db.dbase->listAllLoadableBlocks(dst);
 	if (m_db.dbase_ro)
 		m_db.dbase_ro->listAllLoadableBlocks(dst);
 }
@@ -718,65 +663,23 @@ MapDatabase *ServerMap::createDatabase(
 	return db;
 }
 
-bool ServerMap::createSubWorldDatabase(const std::string &name, s16 offset_x)
-{
-	std::string path = m_savedir + DIR_DELIM + name;
-	Settings conf;
-	conf.set("backend", "sqlite3");
-	conf.set("subworld", "true");
-	conf.setS16("subworld_offset_x", offset_x);
-	MapDatabase *db = createDatabase("sqlite3", path, conf);
-	MutexAutoLock dblock(m_db.mutex);
-	if (m_db.subworld_dbs.count(offset_x)) {
-		delete db;
-		return false;
-	}
-	m_db.subworld_dbs[offset_x] = db;
-	return true;
-}
-
-void ServerMap::switchSubWorldCache()
-{
-	// Emerge threads may still be using the current map database.
-	// Stop them before replacing the in-memory map/cache.
-	m_emerge->stopThreads();
-
-	if (m_map_saving_enabled)
-		save(MOD_STATE_WRITE_AT_UNLOAD);
-
-	// A ServerMap normally keeps all loaded sectors in one memory cache.
-	// Multiworld must not leave blocks from the previous world in that cache.
-	std::vector<v2s16> sectors;
-	sectors.reserve(m_sectors.size());
-	for (const auto &entry : m_sectors)
-		sectors.push_back(entry.first);
-	deleteSectors(sectors);
-	m_detached_blocks.clear();
-
-	// Rebind EmergeManager to the same accessor after its old map binding
-	// has been safely released, then resume generation for the new world.
-	m_emerge->resetMap();
-	m_emerge->initMap(&m_db);
-	m_emerge->startThreads();
-}
-
 void ServerMap::beginSave()
 {
 	MutexAutoLock dblock(m_db.mutex);
-	m_db.beginSave();
+	m_db.dbase->beginSave();
 }
 
 void ServerMap::endSave()
 {
 	MutexAutoLock dblock(m_db.mutex);
-	m_db.endSave();
+	m_db.dbase->endSave();
 }
 
 bool ServerMap::saveBlock(MapBlock *block)
 {
 	// FIXME: serialization happens under mutex
 	MutexAutoLock dblock(m_db.mutex);
-	return saveBlock(block, m_db.getDatabase(block->getPos()), m_map_compression_level);
+	return saveBlock(block, m_db.dbase, m_map_compression_level);
 }
 
 bool ServerMap::saveBlock(MapBlock *block, MapDatabase *db, int compression_level)
@@ -901,7 +804,7 @@ MapBlock* ServerMap::loadBlock(v3s16 blockpos)
 bool ServerMap::deleteBlock(v3s16 blockpos)
 {
 	MutexAutoLock dblock(m_db.mutex);
-	if (!m_db.getDatabase(blockpos)->deleteBlock(blockpos))
+	if (!m_db.dbase->deleteBlock(blockpos))
 		return false;
 
 	MapBlock *block = getBlockNoCreateNoEx(blockpos);
