@@ -6,7 +6,6 @@
 
 #include <vector>
 #include <memory>
-#include <map>
 
 #include "map.h"
 #include "util/container.h" // UniqueQueue
@@ -28,18 +27,10 @@ struct MapDatabaseAccessor {
 	MapDatabase *dbase = nullptr;
 	/// Fallback database for read operations
 	MapDatabase *dbase_ro = nullptr;
-	std::map<s16, MapDatabase *> subworld_dbs;
-
-	MapDatabase *getDatabase(v3s16 blockpos);
 
 	/// Load a block, taking dbase_ro into account.
 	/// @note call locked
 	void loadBlock(v3s16 blockpos, std::string &ret);
-	void saveBlock(v3s16 blockpos, const std::string &data);
-	void deleteBlock(v3s16 blockpos);
-	void beginSave();
-	void endSave();
-	void listAllLoadableBlocks(std::vector<v3s16> &dst);
 };
 
 /*
@@ -113,8 +104,6 @@ public:
 	*/
 	static std::vector<std::string> getDatabaseBackends();
 	static MapDatabase *createDatabase(const std::string &name, const std::string &savedir, Settings &conf);
-	bool createSubWorldDatabase(const std::string &name, s16 offset_x);
-	void switchSubWorldCache();
 
 	// Call these before and after saving of blocks
 	void beginSave() override;
