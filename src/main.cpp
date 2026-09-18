@@ -1186,23 +1186,35 @@ static bool run_dedicated_server(const GameParams &game_params, const Settings &
 		return false;
 	}
 
+	std::string current_world_path = game_params.world_path;
+	const std::string worlds_root = fs::RemoveLastPathComponent(current_world_path);
+	if (worlds_root.empty())
+		return false;
+
+	auto load_next_world = [&]() -> bool {
+		const std::string switch_file = worlds_root + DIR_DELIM + ".luanti_world_switch";
+		std::string name;
+		if (!fs::ReadFile(switch_file, name, false))
+			return false;
+		while (!name.empty() && (name.back() == '\\n' || name.back() == '\\r' || name.back() == ' ' || name.back() == '\\t'))
+			name.pop_back();
+		if (name.empty() || name == "." || name == ".." ||
+			name.find('/') != std::string::npos || name.find('\\\\') != std::string::npos)
+			return false;
+		fs::DeleteSingleFileOrEmptyDirectory(switch_file, true);
+		current_world_path = worlds_root + DIR_DELIM + name;
+		return true;
+	};
+
 	if (cmd_args.exists("terminal")) {
 #if USE_CURSES
 		std::string admin_nick = g_settings->get("name");
 
 		if (!is_valid_player_name(admin_nick)) {
 			if (admin_nick.empty()) {
-				errorstream << "No name given for admin. "
-					<< "Please check your configuration that it "
-					<< "contains a 'name = ...' for your main admin account."
-					<< std::endl;
+				errorstream << "No name given for admin. Please check your configuration." << std::endl;
 			} else {
-				errorstream << "Name for admin '"
-					<< admin_nick << "' is not valid. "
-					<< "Please check that it only contains allowed characters "
-					<< "and that it is at most 20 characters long. "
-					<< "Valid characters are: " << PLAYERNAME_ALLOWED_CHARS_USER_EXPL
-					<< std::endl;
+				errorstream << "Name for admin '" << admin_nick << "' is not valid." << std::endl;
 			}
 			return false;
 		}
@@ -1210,17 +1222,19 @@ static bool run_dedicated_server(const GameParams &game_params, const Settings &
 		volatile auto &kill = *porting::signal_handler_killstatus();
 
 		try {
-			// Create server
-			Server server(game_params.world_path, game_params.game_spec,
-					false, bind_addr, true, &iface);
-
 			g_term_console.setup(&iface, &kill, admin_nick);
-
 			g_term_console.start();
 
-			server.start();
-			// Run server
-			dedicated_server_loop(server, kill);
+			while (true) {
+				{
+					Server server(current_world_path, game_params.game_spec,
+							false, bind_addr, true, &iface);
+					server.start();
+					dedicated_server_loop(server, kill);
+				}
+				if (!load_next_world())
+					break;
+			}
 		} catch (const ModError &e) {
 			g_term_console.stopAndWaitforThread();
 			errorstream << "ModError: " << e.what() << std::endl;
@@ -1231,28 +1245,26 @@ static bool run_dedicated_server(const GameParams &game_params, const Settings &
 			return false;
 		}
 
-		// Tell the console to stop, and wait for it to finish,
-		// only then leave context and free iface
 		g_term_console.stop();
 		g_term_console.wait();
-
 		g_term_console.clearKillStatus();
 	} else {
 #else
-		errorstream << "Cmd arg --terminal passed, but "
-			<< "compiled without ncurses. Ignoring." << std::endl;
+		errorstream << "Cmd arg --terminal passed, but compiled without ncurses. Ignoring." << std::endl;
 	} {
 #endif
 		try {
-			// Create server
-			Server server(game_params.world_path, game_params.game_spec, false,
-				bind_addr, true);
-			server.start();
-
-			// Run server
 			volatile auto &kill = *porting::signal_handler_killstatus();
-			dedicated_server_loop(server, kill);
-
+			while (true) {
+				{
+					Server server(current_world_path, game_params.game_spec,
+							false, bind_addr, true);
+					server.start();
+					dedicated_server_loop(server, kill);
+				}
+				if (!load_next_world())
+					break;
+			}
 		} catch (const ModError &e) {
 			errorstream << "ModError: " << e.what() << std::endl;
 			return false;
@@ -1261,7 +1273,6 @@ static bool run_dedicated_server(const GameParams &game_params, const Settings &
 			return false;
 		}
 	}
-
 	return true;
 }
 
