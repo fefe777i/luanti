@@ -687,15 +687,17 @@ int ModApiServer::l_create_subworld(lua_State *L)
 	lua_pushboolean(L, getServer(L)->createSubWorld(name));
 	return 1;
 }
+
 int ModApiServer::l_transfer_player(lua_State *L)
 {
 	NO_MAP_LOCK_REQUIRED;
 	std::string pname = luaL_checkstring(L, 1);
-	std::string swname = luaL_checkstring(L, 2);
+	std::string world = luaL_checkstring(L, 2);
 	v3f pos = check_v3f(L, 3);
-	lua_pushboolean(L, getServer(L)->transferPlayer(pname, swname, pos));
+	lua_pushboolean(L, getServer(L)->transferPlayer(pname, world, pos));
 	return 1;
 }
+
 int ModApiServer::l_get_player_subworld(lua_State *L)
 {
 	NO_MAP_LOCK_REQUIRED;
@@ -703,6 +705,7 @@ int ModApiServer::l_get_player_subworld(lua_State *L)
 	lua_pushstring(L, getServer(L)->getPlayerSubWorld(pname).c_str());
 	return 1;
 }
+
 int ModApiServer::l_list_subworlds(lua_State *L)
 {
 	NO_MAP_LOCK_REQUIRED;
