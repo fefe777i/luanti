@@ -1199,7 +1199,7 @@ static bool run_dedicated_server(const GameParams &game_params, const Settings &
 		while (!name.empty() && (name.back() == '\\n' || name.back() == '\\r' || name.back() == ' ' || name.back() == '\\t'))
 			name.pop_back();
 		if (name.empty() || name == "." || name == ".." ||
-			name.find('/') != std::string::npos || name.find('\\\\') != std::string::npos)
+			name.find('/') != std::string::npos || name.find('\\') != std::string::npos)
 			return false;
 		fs::DeleteSingleFileOrEmptyDirectory(switch_file, true);
 		current_world_path = worlds_root + DIR_DELIM + name;
