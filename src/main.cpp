@@ -118,7 +118,90 @@ static bool game_configure_subgame(GameParams *game_params, const Settings &cmd_
 static bool get_game_from_cmdline(GameParams *game_params, const Settings &cmd_args);
 static bool determine_subgame(GameParams *game_params);
 
-static bool run_dedicated_server(const GameParams &game_params, const Settings &cmd_args);
+static bool run_dedicated_server(const GameParams &game_params, const Settings &cmd_args)
+{
+	verbosestream << _("Using world path") << " [" << game_params.world_path << "]" << std::endl;
+	verbosestream << _("Using gameid") << " [" << game_params.game_spec.id << "]" << std::endl;
+
+	if (cmd_args.exists("migrate"))
+		return migrate_map_database(game_params, cmd_args);
+	if (cmd_args.exists("migrate-players"))
+		return ServerEnvironment::migratePlayersDatabase(game_params, cmd_args);
+	if (cmd_args.exists("migrate-auth"))
+		return ServerEnvironment::migrateAuthDatabase(game_params, cmd_args);
+	if (cmd_args.exists("migrate-mod-storage"))
+		return Server::migrateModStorageDatabase(game_params, cmd_args);
+	if (cmd_args.getFlag("recompress"))
+		return recompress_map_database(game_params, cmd_args);
+
+	std::string bind_str = g_settings->get("bind_address");
+	Address bind_addr(0, 0, 0, 0, game_params.socket_port);
+	if (g_settings->getBool("ipv6_server"))
+		bind_addr.setAddress(static_cast<IPv6AddressBytes*>(nullptr));
+	try {
+		bind_addr.Resolve(bind_str.c_str());
+	} catch (const ResolveError &e) {
+		warningstream << "Resolving bind address \"" << bind_str
+			<< "\" failed: " << e.what() << " -- Listening on all addresses." << std::endl;
+	}
+	if (bind_addr.isIPv6() && !g_settings->getBool("enable_ipv6")) {
+		errorstream << "Unable to listen on " << bind_addr.serializeString()
+			<< " because IPv6 is disabled" << std::endl;
+		return false;
+	}
+
+	const std::string worlds_root = fs::RemoveLastPathComponent(game_params.world_path);
+	if (worlds_root.empty())
+		return false;
+
+	std::vector<std::pair<std::string, std::string>> world_specs;
+	for (const auto &entry : fs::GetDirListing(worlds_root)) {
+		if (!entry.dir || entry.name.empty() || entry.name[0] == '.')
+			continue;
+		const std::string path = worlds_root + DIR_DELIM + entry.name;
+		if (fs::PathExists(path + DIR_DELIM + "world.mt"))
+			world_specs.emplace_back(entry.name, path);
+	}
+	const std::string current_name = fs::GetFilenameFromPath(game_params.world_path.c_str());
+	bool found_current = false;
+	for (const auto &w : world_specs)
+		found_current |= (w.second == game_params.world_path);
+	if (!found_current)
+		world_specs.emplace_back(current_name, game_params.world_path);
+	std::sort(world_specs.begin(), world_specs.end());
+
+	try {
+		std::vector<std::unique_ptr<Server>> worlds;
+		worlds.reserve(world_specs.size());
+
+		const auto &primary_spec = *std::find_if(world_specs.begin(), world_specs.end(),
+			[&](const auto &w) { return w.second == game_params.world_path; });
+		worlds.emplace_back(std::make_unique<Server>(primary_spec.second, game_params.game_spec,
+				false, bind_addr, true, nullptr, nullptr, nullptr, true, primary_spec.first));
+		const auto shared_con = worlds.front()->getConnection();
+
+		for (const auto &w : world_specs) {
+			if (w.second == primary_spec.second)
+				continue;
+			worlds.emplace_back(std::make_unique<Server>(w.second, game_params.game_spec,
+					false, bind_addr, true, nullptr, nullptr, shared_con, false, w.first));
+		}
+
+		for (auto &world : worlds)
+			world->start();
+
+		volatile auto &kill = *porting::signal_handler_killstatus();
+		dedicated_server_loop(*worlds.front(), kill);
+	} catch (const ModError &e) {
+		errorstream << "ModError: " << e.what() << std::endl;
+		return false;
+	} catch (const ServerError &e) {
+		errorstream << "ServerError: " << e.what() << std::endl;
+		return false;
+	}
+	return true;
+}
+
 static bool migrate_map_database(const GameParams &game_params, const Settings &cmd_args);
 static bool recompress_map_database(const GameParams &game_params, const Settings &cmd_args);
 
