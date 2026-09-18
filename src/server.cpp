@@ -4539,16 +4539,21 @@ bool Server::createSubWorld(const std::string &name)
 	if (isSubWorldDir(path)) return true;
 	if (fs::PathExists(path)) return false;
 	if (!fs::CreateDir(path)) return false;
-	s16 offset = 12500;
+	// Keep the physical map position inside Luanti's signed-16-bit mapblock range.
+	// 1200 blocks = 19200 nodes, leaving room around the origin.
+	s16 offset = 1200;
 	for (const auto &node : fs::GetDirListing(m_path_world)) {
-		if (!node.dir || node.name.empty() || node.name[0] == '.' || node.name == name) continue;
+		if (!node.dir || node.name.empty() || node.name[0] == '.' || node.name == name)
+			continue;
 		const std::string mt = m_path_world + DIR_DELIM + node.name + DIR_DELIM + "world.mt";
 		Settings conf;
-		if (!conf.readConfigFile(mt.c_str()) || !conf.exists("subworld_offset_x")) continue;
+		if (!conf.readConfigFile(mt.c_str()) || !conf.exists("subworld_offset_x"))
+			continue;
 		s16 used = conf.getS16("subworld_offset_x");
-		if (std::abs((int)used - (int)offset) <= 6000) offset = (s16)(offset + 12500);
+		if (std::abs((int)used - (int)offset) < 900)
+			offset = (s16)(offset + 1200);
 	}
-	if (offset <= 0 || offset > 30000) {
+	if (offset <= 0 || offset > 2400) {
 		fs::DeleteSingleFileOrEmptyDirectory(path, true);
 		return false;
 	}
@@ -4575,21 +4580,40 @@ bool Server::transferPlayer(const std::string &playername, const std::string &su
 			break;
 		}
 	}
-	if (!sao) return false;
-	if (subworld_name != "overworld" && !isSubWorldDir(m_path_world + DIR_DELIM + subworld_name)) return false;
+	if (!sao)
+		return false;
+	if (subworld_name != "overworld" &&
+		!isSubWorldDir(m_path_world + DIR_DELIM + subworld_name))
+		return false;
+
 	auto &state = m_player_subworld_states[playername];
-	state.positions[state.current_subworld] = sao->getBasePosition();
+	const std::string from = state.current_subworld.empty() ? "overworld" : state.current_subworld;
+
+	// Save the player's local position in the current world.
+	v3f local_pos = sao->getBasePosition();
+	if (from != "overworld") {
+		Settings from_conf;
+		const std::string from_mt = m_path_world + DIR_DELIM + from + DIR_DELIM + "world.mt";
+		if (!from_conf.readConfigFile(from_mt.c_str()) || !from_conf.exists("subworld_offset_x"))
+			return false;
+		local_pos.X -= (f32)from_conf.getS16("subworld_offset_x") * MAP_BLOCKSIZE;
+	}
+	state.positions[from] = local_pos;
+
+	// Convert the requested local position into the physical map position.
+	v3f physical_pos = pos;
 	if (subworld_name != "overworld") {
 		Settings conf;
 		const std::string mt = m_path_world + DIR_DELIM + subworld_name + DIR_DELIM + "world.mt";
-		if (!conf.readConfigFile(mt.c_str()) || !conf.exists("subworld_offset_x")) return false;
-		s16 offset = conf.getS16("subworld_offset_x");
-		pos.X += (f32)offset * MAP_BLOCKSIZE;
+		if (!conf.readConfigFile(mt.c_str()) || !conf.exists("subworld_offset_x"))
+			return false;
+		physical_pos.X += (f32)conf.getS16("subworld_offset_x") * MAP_BLOCKSIZE;
 	}
+
 	state.current_subworld = subworld_name;
 	state.positions[subworld_name] = pos;
-	sao->setBasePosition(pos);
-	sao->setPos(pos);
+	sao->setBasePosition(physical_pos);
+	sao->setPos(physical_pos);
 	return true;
 }
 
