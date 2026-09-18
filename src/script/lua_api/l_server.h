@@ -75,11 +75,6 @@ private:
 	static int l_register_mapgen_script(lua_State *L);
 	// serialize_roundtrip(obj)
 	static int l_serialize_roundtrip(lua_State *L);
-	static int l_create_subworld(lua_State *L);
-	static int l_transfer_player(lua_State *L);
-	static int l_get_player_subworld(lua_State *L);
-	static int l_list_subworlds(lua_State *L);
-	static int l_switch_world(lua_State *L);
 	// create_subworld(name)
 	static int l_create_subworld(lua_State *L);
 	// transfer_player(name, subworld_name, pos)
@@ -88,6 +83,8 @@ private:
 	static int l_get_player_subworld(lua_State *L);
 	// list_subworlds()
 	static int l_list_subworlds(lua_State *L);
+	// switch_world(name)
+	static int l_switch_world(lua_State *L);
 public:
 	static void Initialize(lua_State *L, int top);
 	static void InitializeAsync(lua_State *L, int top);
