@@ -14,6 +14,9 @@ def patch(path, old, new, label):
     if new in s:
         print(f"SKIP: {label} already applied")
         return
+    if path == "src/server.h" and label == "server.h Multiworld API" and "bool createSubWorld(const std::string &name);" in s:
+        print(f"SKIP: {label} already present")
+        return
     if old not in s:
         raise SystemExit(f"ERROR: anchor not found for {label}: {path}")
     p.write_text(s.replace(old, new, 1))
