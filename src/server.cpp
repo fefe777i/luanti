@@ -75,6 +75,7 @@
 #include <algorithm>
 #include <sstream>
 #include <csignal>
+#include <fstream>
 
 std::unordered_map<std::string, Server*> Server::s_worlds;
 std::unordered_map<session_t, Server*> Server::s_peer_worlds;
@@ -386,6 +387,10 @@ Server::Server(
 
 Server::~Server()
 {
+	{
+		std::lock_guard<std::mutex> lock(s_multiworld_mutex);
+		if (!m_world_name.empty()) s_worlds.erase(m_world_name);
+	}
 	// Send shutdown message
 	SendChatMessage(PEER_ID_INEXISTENT, ChatMessage(CHATMESSAGE_TYPE_ANNOUNCE,
 			L"*** Server shutting down"));
@@ -1155,63 +1160,6 @@ void Server::AsyncRunStep(float dtime, bool initial_step)
 	m_shutdown_state.tick(dtime, this);
 }
 
-void Server::Receive(float min_time)
-{
-	ZoneScoped;
-	auto framemarker = FrameMarker("Server::Receive()-frame").started();
-
-	const u64 t0 = porting::getTimeUs();
-	const float min_time_us = min_time * 1e6f;
-	auto remaining_time_us = [&]() -> float {
-		return std::max(0.0f, min_time_us - (porting::getTimeUs() - t0));
-	};
-
-	NetworkPacket pkt;
-	session_t peer_id;
-	for (;;) {
-		pkt.clear();
-		peer_id = 0;
-		try {
-			// Round up since the target step length is the minimum step length,
-			// we only have millisecond precision and we don't want to busy-wait
-			// by calling ReceiveTimeoutMs(.., 0) repeatedly.
-			const u32 cur_timeout_ms = std::ceil(remaining_time_us() / 1000.0f);
-
-			if (!m_con->ReceiveTimeoutMs(&pkt, cur_timeout_ms)) {
-				// No incoming data.
-				if (remaining_time_us() > 0.0f)
-					continue;
-				else
-					break;
-			}
-
-			peer_id = pkt.getPeerId();
-			m_packet_recv_counter->increment();
-			ProcessData(&pkt);
-			m_packet_recv_processed_counter->increment();
-		} catch (const con::InvalidIncomingDataException &e) {
-			infostream << "Server::Receive(): InvalidIncomingDataException: what()="
-					<< e.what() << std::endl;
-		} catch (SerializationError &e) {
-			enrich_exception(e, pkt, true);
-			infostream << "Server::Receive(): SerializationError: what()="
-					<< e.what() << std::endl;
-		} catch (PacketError &e) {
-			enrich_exception(e, pkt, false);
-			actionstream << "Server::Receive(): PacketError: what()="
-					<< e.what() << std::endl;
-		} catch (const ClientStateError &e) {
-			errorstream << "ClientStateError: peer=" << peer_id << " what()="
-					 << e.what() << std::endl;
-			DenyAccess(peer_id, SERVER_ACCESSDENIED_UNEXPECTED_DATA);
-		} catch (con::PeerNotFoundException &e) {
-			infostream << "Server: PeerNotFoundException" << std::endl;
-		} catch (ClientNotFoundException &e) {
-			infostream << "Server: ClientNotFoundException" << std::endl;
-		}
-	}
-}
-
 void Server::yieldToOtherThreads(float dtime)
 {
 	/*
@@ -1418,15 +1366,27 @@ void Server::onMapEditEvent(const MapEditEvent &event)
 void Server::peerAdded(con::IPeer *peer)
 {
 	verbosestream << "Server::peerAdded(): id=" << peer->id << std::endl;
-
+	std::lock_guard<std::mutex> lock(s_multiworld_mutex);
 	m_clients.CreateClient(peer->id);
+	s_peer_worlds[peer->id] = this;
 }
 
 void Server::deletingPeer(con::IPeer *peer, bool timeout)
 {
-	verbosestream << "Server::deletingPeer(): id=" << peer->id
-		<< ", timeout=" << timeout << std::endl;
-
+	Server *target = this;
+	{
+		std::lock_guard<std::mutex> lock(s_multiworld_mutex);
+		auto it = s_peer_worlds.find(peer->id);
+		if (it != s_peer_worlds.end()) {
+			target = it->second;
+			s_peer_worlds.erase(it);
+		}
+	}
+	if (target != this) {
+		target->m_clients.event(peer->id, CSE_Disconnect);
+		target->DeleteClient(peer->id, timeout ? CDR_TIMEOUT : CDR_LEAVE);
+		return;
+	}
 	m_clients.event(peer->id, CSE_Disconnect);
 	DeleteClient(peer->id, timeout ? CDR_TIMEOUT : CDR_LEAVE);
 }
