@@ -1196,7 +1196,7 @@ static bool run_dedicated_server(const GameParams &game_params, const Settings &
 		std::string name;
 		if (!fs::ReadFile(switch_file, name, false))
 			return false;
-		while (!name.empty() && (name.back() == '\\n' || name.back() == '\\r' || name.back() == ' ' || name.back() == '\\t'))
+		while (!name.empty() && (name.back() == '\n' || name.back() == '\r' || name.back() == ' ' || name.back() == '\t'))
 			name.pop_back();
 		if (name.empty() || name == "." || name == ".." ||
 			name.find('/') != std::string::npos || name.find('\\') != std::string::npos)
