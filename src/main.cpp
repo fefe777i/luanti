@@ -3,6 +3,9 @@
 // Copyright (C) 2010-2013 celeron55, Perttu Ahola <celeron55@gmail.com>
 
 #include <map>
+#include <algorithm>
+#include <memory>
+#include <vector>
 #include "irrlichttypes_bloated.h"
 #include "chat_interface.h"
 #include "debug.h"
