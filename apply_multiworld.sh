@@ -20,6 +20,9 @@ def patch(path, old, new, label):
     if path == "src/script/lua_api/l_server.cpp" and label == "l_server.cpp functions" and "int ModApiServer::l_create_subworld(lua_State *L)" in s:
         print(f"SKIP: {label} already present")
         return
+    if path == "src/server.cpp" and label == "server.cpp Multiworld implementation" and "bool Server::createSubWorld(const std::string &name)" in s:
+        print(f"SKIP: {label} already present")
+        return
     if old not in s:
         raise SystemExit(f"ERROR: anchor not found for {label}: {path}")
     p.write_text(s.replace(old, new, 1))
