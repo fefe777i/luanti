@@ -1,4 +1,4 @@
 #!/bin/bash
 set -e
 cd "$(cd "$(dirname "$0")" && pwd)"
-echo "=== Multiworld map database code is already committed in src/servermap.* ==="
+echo "=== Physical world maps are already implemented in source ==="
