@@ -487,6 +487,18 @@ void Server::init()
 		throw ServerError(std::string("Failed to initialize world: ") + e.what());
 	}
 
+	// Register physical world instances. This is metadata only for now;
+	// world routing will bind players to an instance in a later step.
+	m_world_instances.clear();
+	m_world_instances.emplace("overworld",
+			std::make_unique<WorldInstance>("overworld", m_path_world));
+	for (const auto &spec : discoverSubWorlds(m_path_world)) {
+		if (spec.name == "overworld")
+			continue;
+		m_world_instances.emplace(spec.name,
+				std::make_unique<WorldInstance>(spec.name, spec.path));
+	}
+
 	// Create emerge manager
 	m_emerge = std::make_unique<EmergeManager>(this, m_metrics_backend.get());
 
@@ -4537,6 +4549,8 @@ bool Server::createSubWorld(const std::string &name)
 		return false;
 	const std::string path = m_path_world + DIR_DELIM + name;
 	if (isSubWorldDir(path)) {
+		m_world_instances.emplace(name,
+				std::make_unique<WorldInstance>(name, path));
 		Settings old_conf;
 		const std::string mt = path + DIR_DELIM + "world.mt";
 		if (old_conf.readConfigFile(mt.c_str()) && old_conf.exists("subworld_offset_x") &&
@@ -4576,6 +4590,9 @@ bool Server::createSubWorld(const std::string &name)
 		fs::DeleteSingleFileOrEmptyDirectory(path, true);
 		return false;
 	}
+
+	m_world_instances.emplace(name,
+			std::make_unique<WorldInstance>(name, path));
 	return m_env->getServerMap().createSubWorldDatabase(name, offset);
 }
 
