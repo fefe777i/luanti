@@ -66,6 +66,7 @@ public:
 	v3f getBasePosition() const { return m_base_position; }
 	void setBasePosition(v3f pos);
 	ServerEnvironment* getEnv(){ return m_env; }
+	void setEnv(ServerEnvironment *env){ m_env = env; }
 
 	/*
 		Some more dynamic interface
