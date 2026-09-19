@@ -360,6 +360,23 @@ void ServerEnvironment::addPlayer(RemotePlayer *player)
 	m_players.push_back(player);
 }
 
+RemotePlayer *ServerEnvironment::detachPlayer(const std::string &name)
+{
+	for (auto it = m_players.begin(); it != m_players.end(); ++it) {
+		if ((*it)->getName() == name) {
+			RemotePlayer *player = *it;
+			m_players.erase(it);
+			return player;
+		}
+	}
+	return nullptr;
+}
+
+std::unique_ptr<ServerActiveObject> ServerEnvironment::takeActiveObject(u16 id)
+{
+	return m_ao_manager.takeObject(id);
+}
+
 void ServerEnvironment::removePlayer(RemotePlayer *player)
 {
 	for (auto it = m_players.begin(); it != m_players.end(); ++it) {
