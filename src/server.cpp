@@ -4635,15 +4635,15 @@ bool Server::createSubWorld(const std::string &name)
 
 bool Server::transferPlayer(const std::string &playername, const std::string &subworld_name, v3f pos)
 {
-	PlayerSAO *sao = nullptr;
-	for (session_t peer_id : m_clients.getClientIDs()) {
-		RemoteClient *client = getClient(peer_id);
-		if (client && client->getName() == playername) {
-			sao = getPlayerSAO(peer_id);
-			break;
-		}
-	}
-	if (!sao)
+	if (!isValidSubWorldName(subworld_name))
+		return false;
+
+	auto state_it = m_player_subworld_states.find(playername);
+	const std::string from = state_it == m_player_subworld_states.end() ?
+			"overworld" : state_it->second.current_subworld;
+
+	ServerEnvironment *source_env = getWorldEnvironment(from);
+	if (!source_env)
 		return false;
 
 	ServerEnvironment *target_env = getWorldEnvironment(subworld_name);
@@ -4666,41 +4666,55 @@ bool Server::transferPlayer(const std::string &playername, const std::string &su
 			return false;
 		}
 	}
-	if (subworld_name != "overworld" &&
-		!isSubWorldDir(m_path_world + DIR_DELIM + subworld_name))
+
+	RemotePlayer *player = source_env->getPlayer(playername.c_str());
+	if (!player)
 		return false;
 
-	auto &state = m_player_subworld_states[playername];
-	const std::string from = state.current_subworld.empty() ? "overworld" : state.current_subworld;
+	PlayerSAO *sao = player->getPlayerSAO();
+	if (!sao)
+		return false;
 
-	// Save the player's local position in the current world.
-	v3f local_pos = sao->getBasePosition();
-	if (from != "overworld") {
-		Settings from_conf;
-		const std::string from_mt = m_path_world + DIR_DELIM + from + DIR_DELIM + "world.mt";
-		if (!from_conf.readConfigFile(from_mt.c_str()) || !from_conf.exists("subworld_offset_x"))
-			return false;
-		local_pos.X -= (f32)from_conf.getS16("subworld_offset_x") * MAP_BLOCKSIZE;
-	}
-	state.positions[from] = local_pos;
-
-	// Convert the requested local position into the physical map position.
-	v3f physical_pos = pos;
-	if (subworld_name != "overworld") {
-		Settings conf;
-		const std::string mt = m_path_world + DIR_DELIM + subworld_name + DIR_DELIM + "world.mt";
-		if (!conf.readConfigFile(mt.c_str()) || !conf.exists("subworld_offset_x"))
-			return false;
-		physical_pos.X += (f32)conf.getS16("subworld_offset_x") * MAP_BLOCKSIZE;
+	if (from == subworld_name) {
+		sao->setBasePosition(pos);
+		sao->setPos(pos);
+		return true;
 	}
 
-	if (from != subworld_name)
-		m_env = target_env;
+	const u16 sao_id = sao->getId();
+	std::unique_ptr<ServerActiveObject> object = source_env->takeActiveObject(sao_id);
+	if (!object || object.get() != sao)
+		return false;
 
-	state.current_subworld = subworld_name;
-	state.positions[subworld_name] = pos;
-	sao->setBasePosition(pos);
-	sao->setPos(pos);
+	RemotePlayer *detached_player = source_env->detachPlayer(playername);
+	if (!detached_player) {
+		source_env->addActiveObject(std::move(object));
+		return false;
+	}
+
+	object->setEnv(target_env);
+	object->setBasePosition(pos);
+	object->setPos(pos);
+
+	if (target_env->getPlayer(playername.c_str()) != nullptr) {
+		source_env->addPlayer(detached_player);
+		object->setEnv(source_env);
+		source_env->addActiveObject(std::move(object));
+		return false;
+	}
+
+	target_env->addPlayer(detached_player);
+	if (!target_env->addActiveObject(std::move(object))) {
+		target_env->removePlayer(detached_player);
+		source_env->addPlayer(detached_player);
+		return false;
+	}
+
+	m_env = target_env;
+	m_player_subworld_states[playername].current_subworld = subworld_name;
+	m_player_subworld_states[playername].positions[subworld_name] = pos;
+
+	SendMovePlayer(detached_player->getPlayerSAO());
 	return true;
 }
 
