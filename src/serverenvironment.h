@@ -112,7 +112,8 @@ enum ClearObjectsMode {
 class ServerEnvironment final : public Environment
 {
 public:
-	ServerEnvironment(std::unique_ptr<ServerMap> map, Server *server, MetricsBackend *mb,\n\t\tconst std::string &world_path = "");
+	ServerEnvironment(std::unique_ptr<ServerMap> map, Server *server, MetricsBackend *mb,
+	\tconst std::string &world_path = "");
 	~ServerEnvironment();
 
 	void init();
@@ -364,6 +365,8 @@ private:
 		Member variables
 	*/
 
+	// Physical world directory
+	std::string m_world_path;
 	// The map
 	std::unique_ptr<ServerMap> m_map;
 	// Lua state
