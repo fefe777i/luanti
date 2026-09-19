@@ -1336,6 +1336,11 @@ inline void Server::handleCommand(NetworkPacket *pkt)
 
 void Server::ProcessData(NetworkPacket *pkt)
 {
+	if (RemoteClient *client = getClient(pkt->getPeerId(), CS_Active)) {
+		if (auto *env = getPlayerEnvironment(client->getName()))
+			m_env = env;
+	}
+
 	// Environment is locked first.
 	EnvAutoLock envlock(this);
 
@@ -4542,6 +4547,20 @@ bool Server::migrateModStorageDatabase(const GameParams &game_params, const Sett
 	return succeeded;
 }
 
+ServerEnvironment *Server::getWorldEnvironment(const std::string &name)
+{
+	auto it = m_world_environments.find(name);
+	return it == m_world_environments.end() ? nullptr : it->second.get();
+}
+
+ServerEnvironment *Server::getPlayerEnvironment(const std::string &playername)
+{
+	auto it = m_player_subworld_states.find(playername);
+	const std::string name = it == m_player_subworld_states.end() ?
+			"overworld" : it->second.current_subworld;
+	return getWorldEnvironment(name);
+}
+
 bool Server::createSubWorld(const std::string &name)
 {
 	if (name.empty() || name == "." || name == ".." || name == "overworld" ||
@@ -4593,7 +4612,7 @@ bool Server::createSubWorld(const std::string &name)
 
 	m_world_instances.emplace(name,
 			std::make_unique<WorldInstance>(name, path));
-	return m_env->getServerMap().createSubWorldDatabase(name, offset);
+	return true;
 }
 
 bool Server::transferPlayer(const std::string &playername, const std::string &subworld_name, v3f pos)
@@ -4608,6 +4627,27 @@ bool Server::transferPlayer(const std::string &playername, const std::string &su
 	}
 	if (!sao)
 		return false;
+
+	ServerEnvironment *target_env = getWorldEnvironment(subworld_name);
+	if (!target_env) {
+		auto wit = m_world_instances.find(subworld_name);
+		if (wit == m_world_instances.end())
+			return false;
+		try {
+			auto map = std::make_unique<ServerMap>(wit->second->path, this,
+					m_emerge.get(), m_metrics_backend.get());
+			auto env = std::make_unique<ServerEnvironment>(std::move(map), this,
+					m_metrics_backend.get(), wit->second->path);
+			env->init();
+			env->loadMeta();
+			target_env = env.get();
+			m_world_environments.emplace(subworld_name, std::move(env));
+		} catch (const std::exception &e) {
+			errorstream << "Failed to load world " << subworld_name
+					<< ": " << e.what() << std::endl;
+			return false;
+		}
+	}
 	if (subworld_name != "overworld" &&
 		!isSubWorldDir(m_path_world + DIR_DELIM + subworld_name))
 		return false;
@@ -4637,12 +4677,12 @@ bool Server::transferPlayer(const std::string &playername, const std::string &su
 	}
 
 	if (from != subworld_name)
-		m_env->getServerMap().switchSubWorldCache();
+		m_env = target_env;
 
 	state.current_subworld = subworld_name;
 	state.positions[subworld_name] = pos;
-	sao->setBasePosition(physical_pos);
-	sao->setPos(physical_pos);
+	sao->setBasePosition(pos);
+	sao->setPos(pos);
 	return true;
 }
 
