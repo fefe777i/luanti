@@ -421,12 +421,20 @@ Server::~Server()
 		infostream << "Server: Saving environment metadata" << std::endl;
 		m_env->saveMeta();
 
+		for (auto &it : m_world_environments) {
+			if (it.second.get() == m_env)
+				continue;
+			it.second->deactivateBlocksAndObjects();
+			it.second->saveLoadedPlayers(true);
+			it.second->saveMeta();
+		}
+
 		// Delete classes that depend on the environment
 		m_inventory_mgr.reset();
 		m_script.reset();
 
-		// Note that this also deletes and saves the map.
-		delete m_env;
+		// World environments own and save their physical maps.
+		m_world_environments.clear();
 		m_env = nullptr;
 	}
 
