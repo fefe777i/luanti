@@ -24,6 +24,7 @@ public:
 			const std::function<void(ServerActiveObject *)> &f) override;
 	bool registerObject(std::unique_ptr<ServerActiveObject> obj) override;
 	void removeObject(u16 id) override;
+	std::unique_ptr<ServerActiveObject> takeObject(u16 id);
 
 	void invalidateActiveObjectObserverCaches();
 

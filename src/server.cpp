@@ -421,12 +421,20 @@ Server::~Server()
 		infostream << "Server: Saving environment metadata" << std::endl;
 		m_env->saveMeta();
 
+		for (auto &it : m_world_environments) {
+			if (it.second.get() == m_env)
+				continue;
+			it.second->deactivateBlocksAndObjects();
+			it.second->saveLoadedPlayers(true);
+			it.second->saveMeta();
+		}
+
 		// Delete classes that depend on the environment
 		m_inventory_mgr.reset();
 		m_script.reset();
 
-		// Note that this also deletes and saves the map.
-		delete m_env;
+		// World environments own and save their physical maps.
+		m_world_environments.clear();
 		m_env = nullptr;
 	}
 
@@ -485,6 +493,33 @@ void Server::init()
 				m_gamespec, false);
 	} catch (const BaseException &e) {
 		throw ServerError(std::string("Failed to initialize world: ") + e.what());
+	}
+
+	// Register physical world instances. This is metadata only for now;
+	// world routing will bind players to an instance in a later step.
+	m_world_instances.clear();
+	m_world_instances.emplace("overworld",
+			std::make_unique<WorldInstance>("overworld", m_path_world));
+	for (const auto &spec : discoverSubWorlds(m_path_world)) {
+		if (spec.name == "overworld")
+			continue;
+		m_world_instances.emplace(spec.name,
+				std::make_unique<WorldInstance>(spec.name, spec.path));
+	}
+
+	// Restore persisted physical-world routing for reconnecting players.
+	{
+		Settings states;
+		const std::string state_path = m_path_world + DIR_DELIM + "multiworld_players.mt";
+		if (states.readConfigFile(state_path.c_str())) {
+			for (const std::string &playername : states.getNames()) {
+				std::string world;
+				if (!states.getNoEx(playername, world) || !isValidSubWorldName(world))
+					continue;
+				if (world == "overworld" || m_world_instances.find(world) != m_world_instances.end())
+					m_player_subworld_states[playername].current_subworld = world;
+			}
+		}
 	}
 
 	// Create emerge manager
@@ -739,7 +774,11 @@ void Server::AsyncRunStep(float dtime, bool initial_step)
 		m_env->reportMaxLagEstimate(max_lag);
 
 		// Step environment
-		m_env->step(dtime);
+		for (auto &it : m_world_environments) {
+			m_env = it.second.get();
+			m_env->step(dtime);
+		}
+		m_env = getWorldEnvironment("overworld");
 	}
 
 	static const float map_timer_and_unload_dtime = 2.92;
@@ -756,7 +795,11 @@ void Server::AsyncRunStep(float dtime, bool initial_step)
 	/*
 		Note: Orphan MapBlock ptrs become dangling after this call.
 	*/
-	m_env->getServerMap().step();
+	for (auto &it : m_world_environments) {
+		m_env = it.second.get();
+		m_env->getServerMap().step();
+	}
+	m_env = getWorldEnvironment("overworld");
 
 	/*
 		Listen to the admin chat, if available
@@ -851,29 +894,28 @@ void Server::AsyncRunStep(float dtime, bool initial_step)
 		Check added and deleted active objects
 	*/
 	{
-		//infostream<<"Server: Checking added and deleted active objects"<<std::endl;
-		EnvAutoLock envlock(this);
+		ClientInterface::AutoLock clientlock(m_clients);
+		const RemoteClientMap &clients = m_clients.getClientList();
 
-		// This guarantees that each object recomputes its cache only once per server step,
-		// unless get_effective_observers is called.
-		// If we were to update observer sets eagerly in set_observers instead,
-		// the total costs of calls to set_observers could theoretically be higher.
-		m_env->invalidateActiveObjectObserverCaches();
+		std::vector<ServerEnvironment *> environments;
+		environments.push_back(getWorldEnvironment("overworld"));
+		for (auto &world : m_world_environments)
+			environments.push_back(world.second.get());
 
-		{
-			ClientInterface::AutoLock clientlock(m_clients);
-			const RemoteClientMap &clients = m_clients.getClientList();
-			ScopeProfiler sp(g_profiler, "Server: update objects within range");
+		for (ServerEnvironment *environment : environments) {
+			if (!environment)
+				continue;
+			m_env = environment;
+			EnvAutoLock envlock(this);
+			m_env->invalidateActiveObjectObserverCaches();
 
-			m_player_gauge->set(clients.size());
 			for (const auto &client_it : clients) {
 				RemoteClient *client = client_it.second;
-
 				if (client->getState() < CS_DefinitionsSent)
 					continue;
 
-				// This can happen if the client times out somehow
-				if (!m_env->getPlayer(client->peer_id))
+				ServerEnvironment *player_env = getPlayerEnvironment(client->getName());
+				if (player_env != m_env)
 					continue;
 
 				PlayerSAO *playersao = getPlayerSAO(client->peer_id);
@@ -883,6 +925,9 @@ void Server::AsyncRunStep(float dtime, bool initial_step)
 				SendActiveObjectRemoveAdd(client, playersao);
 			}
 		}
+
+		// The main environment is not stored in m_world_environments.
+		m_env = getWorldEnvironment("overworld");
 
 		// Write changes to the mod storage
 		m_mod_storage_save_timer -= dtime;
@@ -897,101 +942,83 @@ void Server::AsyncRunStep(float dtime, bool initial_step)
 		Send object messages
 	*/
 	{
-		EnvAutoLock envlock(this);
-		ScopeProfiler sp(g_profiler, "Server: send SAO messages");
+		ClientInterface::AutoLock clientlock(m_clients);
+		const RemoteClientMap &clients = m_clients.getClientList();
 
-		// Key = object id
-		// Value = data sent by object
-		std::unordered_map<u16, std::vector<ActiveObjectMessage>*> buffered_messages;
+		for (auto &world : m_world_environments) {
+			m_env = world.second.get();
+			EnvAutoLock envlock(this);
 
-		// Get active object messages from environment
-		ActiveObjectMessage aom(0);
-		u32 count_reliable = 0, count_unreliable = 0;
-		for(;;) {
-			if (!m_env->getActiveObjectMessage(&aom))
-				break;
-			if (aom.reliable)
-				count_reliable++;
-			else
-				count_unreliable++;
+			std::unordered_map<u16, std::vector<ActiveObjectMessage>*> buffered_messages;
+			ActiveObjectMessage aom(0);
+			u32 count_reliable = 0, count_unreliable = 0;
 
-			std::vector<ActiveObjectMessage>* message_list = nullptr;
-			auto n = buffered_messages.find(aom.id);
-			if (n == buffered_messages.end()) {
-				message_list = new std::vector<ActiveObjectMessage>;
-				buffered_messages[aom.id] = message_list;
-			} else {
-				message_list = n->second;
+			for (;;) {
+				if (!m_env->getActiveObjectMessage(&aom))
+					break;
+				if (aom.reliable)
+					count_reliable++;
+				else
+					count_unreliable++;
+
+				auto n = buffered_messages.find(aom.id);
+				if (n == buffered_messages.end()) {
+					auto *list = new std::vector<ActiveObjectMessage>;
+					buffered_messages[aom.id] = list;
+					list->push_back(std::move(aom));
+				} else {
+					n->second->push_back(std::move(aom));
+				}
 			}
-			message_list->push_back(std::move(aom));
-		}
 
-		m_aom_buffer_counter[0]->increment(count_reliable);
-		m_aom_buffer_counter[1]->increment(count_unreliable);
+			m_aom_buffer_counter[0]->increment(count_reliable);
+			m_aom_buffer_counter[1]->increment(count_unreliable);
 
-		{
-			ClientInterface::AutoLock clientlock(m_clients);
-			const RemoteClientMap &clients = m_clients.getClientList();
-			// Route data to every client
-			std::string reliable_data, unreliable_data;
 			for (const auto &client_it : clients) {
-				reliable_data.clear();
-				unreliable_data.clear();
 				RemoteClient *client = client_it.second;
+				if (client->getState() < CS_DefinitionsSent)
+					continue;
+				if (getPlayerEnvironment(client->getName()) != m_env)
+					continue;
+
 				PlayerSAO *player = getPlayerSAO(client->peer_id);
-				// Go through all objects in message buffer
+				if (!player)
+					continue;
+
+				std::string reliable_data, unreliable_data;
 				for (const auto &buffered_message : buffered_messages) {
-					// If object does not exist or is not known by client, skip it
 					u16 id = buffered_message.first;
 					ServerActiveObject *sao = m_env->getActiveObject(id);
 					if (!sao || client->m_known_objects.find(id) == client->m_known_objects.end())
 						continue;
 
-					// Get message list of object
-					std::vector<ActiveObjectMessage>* list = buffered_message.second;
-					// Go through every message
-					for (const ActiveObjectMessage &aom : *list) {
-						const auto cmd = static_cast<ActiveObjectCommand>(aom.datastring[0]);
-
-						// Send position updates to players who do not see the attachment
+					for (const ActiveObjectMessage &msg : *buffered_message.second) {
+						const auto cmd = static_cast<ActiveObjectCommand>(msg.datastring[0]);
 						if (cmd == AO_CMD_UPDATE_POSITION) {
 							if (sao->getId() == player->getId())
 								continue;
-
-							// Do not send position updates for attached players
-							// as long the parent is known to the client
 							ServerActiveObject *parent = sao->getParent();
 							if (parent && client->m_known_objects.find(parent->getId()) !=
-									client->m_known_objects.end())
+								client->m_known_objects.end())
 								continue;
 						}
-
 						if (cmd >= AO_CMD_STOP_ANIMATION && client->net_proto_version < 52)
-							continue; // AO_CMD_STOP_ANIMATION added in protocol version 52
-
-						// Add full new data to appropriate buffer
-						std::string &buffer = aom.reliable ? reliable_data : unreliable_data;
-						aom.appendTo(buffer);
+							continue;
+						std::string &buffer = msg.reliable ? reliable_data : unreliable_data;
+						msg.appendTo(buffer);
 					}
 				}
-				/*
-					reliable_data and unreliable_data are now ready.
-					Send them.
-				*/
-				if (!reliable_data.empty()) {
+
+				if (!reliable_data.empty())
 					SendActiveObjectMessages(client->peer_id, reliable_data);
-				}
-
-				if (!unreliable_data.empty()) {
+				if (!unreliable_data.empty())
 					SendActiveObjectMessages(client->peer_id, unreliable_data, false);
-				}
 			}
+			for (auto &entry : buffered_messages)
+				delete entry.second;
 		}
 
-		// Clear buffered_messages
-		for (auto &buffered_message : buffered_messages) {
-			delete buffered_message.second;
-		}
+		m_env = getWorldEnvironment("overworld");
 	}
 
 	/*
@@ -1242,6 +1269,8 @@ PlayerSAO *Server::StageTwoClientInit(session_t peer_id)
 		RemoteClient* client = m_clients.lockedGetClientNoEx(peer_id, CS_InitDone);
 		if (client) {
 			playername = client->getName();
+			if (ServerEnvironment *player_env = getPlayerEnvironment(playername))
+				m_env = player_env;
 			sao = emergePlayer(playername.c_str(), peer_id, client->net_proto_version);
 		}
 	}
@@ -1324,6 +1353,11 @@ inline void Server::handleCommand(NetworkPacket *pkt)
 
 void Server::ProcessData(NetworkPacket *pkt)
 {
+	if (RemoteClient *client = getClient(pkt->getPeerId(), CS_Active)) {
+		if (auto *env = getPlayerEnvironment(client->getName()))
+			m_env = env;
+	}
+
 	// Environment is locked first.
 	EnvAutoLock envlock(this);
 
@@ -2582,65 +2616,60 @@ void Server::SendBlocks(float dtime)
 	EnvAutoLock envlock(this);
 
 	std::vector<PrioritySortedBlockTransfer> queue;
-
 	u32 total_sending = 0, unique_clients = 0;
 
 	{
 		ScopeProfiler sp2(g_profiler, "Server::SendBlocks(): Collect list");
-
 		std::vector<session_t> clients = m_clients.getClientIDs();
-
 		ClientInterface::AutoLock clientlock(m_clients);
+
 		for (const session_t client_id : clients) {
 			RemoteClient *client = m_clients.lockedGetClientNoEx(client_id, CS_Active);
-
 			if (!client)
+				continue;
+
+			ServerEnvironment *env = getPlayerEnvironment(client->getName());
+			if (!env)
 				continue;
 
 			total_sending += client->getSendingCount();
 			const auto old_count = queue.size();
-			client->GetNextBlocks(m_env, m_emerge.get(), dtime, queue);
+			client->GetNextBlocks(env, m_emerge.get(), dtime, queue);
 			unique_clients += queue.size() > old_count ? 1 : 0;
 		}
 	}
 
-	// Sort.
-	// Lowest priority number comes first.
-	// Lowest is most important.
 	std::sort(queue.begin(), queue.end());
 
 	ClientInterface::AutoLock clientlock(m_clients);
-
-	// Maximal total count calculation
-	// The per-client block sends is halved with the maximal online users
-	u32 max_blocks_to_send = (m_env->getPlayerCount() + g_settings->getU32("max_users")) *
+	const u32 max_blocks_to_send =
+		(m_clients.getClientIDs().size() + g_settings->getU32("max_users")) *
 		g_settings->getU32("max_simultaneous_block_sends_per_client") / 4 + 1;
 
 	ScopeProfiler sp(g_profiler, "Server::SendBlocks(): Send to clients");
-	Map &map = m_env->getMap();
-
 	SerializedBlockCache cache, *cache_ptr = nullptr;
-	if (unique_clients > 1) {
-		// caching is pointless with a single client
+	if (unique_clients > 1)
 		cache_ptr = &cache;
-	}
 
 	for (const PrioritySortedBlockTransfer &block_to_send : queue) {
 		if (total_sending >= max_blocks_to_send)
 			break;
 
-		MapBlock *block = map.getBlockNoCreateNoEx(block_to_send.pos);
-		if (!block)
+		RemoteClient *client = m_clients.lockedGetClientNoEx(
+				block_to_send.peer_id, CS_Active);
+		if (!client)
 			continue;
 
-		RemoteClient *client = m_clients.lockedGetClientNoEx(block_to_send.peer_id,
-				CS_Active);
-		if (!client)
+		ServerEnvironment *env = getPlayerEnvironment(client->getName());
+		if (!env)
+			continue;
+
+		MapBlock *block = env->getMap().getBlockNoCreateNoEx(block_to_send.pos);
+		if (!block)
 			continue;
 
 		SendBlockNoLock(block_to_send.peer_id, block, client->serialization_version,
 				client->net_proto_version, cache_ptr);
-
 		client->SentBlock(block_to_send.pos);
 		total_sending++;
 	}
@@ -2648,85 +2677,25 @@ void Server::SendBlocks(float dtime)
 
 bool Server::SendBlock(session_t peer_id, const v3s16 &blockpos)
 {
-	MapBlock *block = m_env->getMap().getBlockNoCreateNoEx(blockpos);
+	RemoteClient *client = getClient(peer_id, CS_Active);
+	if (!client)
+		return false;
+
+	ServerEnvironment *env = getPlayerEnvironment(client->getName());
+	if (!env)
+		return false;
+
+	MapBlock *block = env->getMap().getBlockNoCreateNoEx(blockpos);
 	if (!block)
 		return false;
 
 	ClientInterface::AutoLock clientlock(m_clients);
-	RemoteClient *client = m_clients.lockedGetClientNoEx(peer_id, CS_Active);
+	client = m_clients.lockedGetClientNoEx(peer_id, CS_Active);
 	if (!client || client->isBlockSent(blockpos))
 		return false;
+
 	SendBlockNoLock(peer_id, block, client->serialization_version,
 			client->net_proto_version);
-
-	return true;
-}
-
-bool Server::addMediaFile(const std::string &filename,
-	const std::string &filepath, std::string *filedata_to,
-	std::string *digest_to)
-{
-	// If name contains illegal characters, ignore the file
-	if (!string_allowed(filename, TEXTURENAME_ALLOWED_CHARS)) {
-		warningstream << "Server: ignoring file as it has disallowed characters: \""
-				<< filename << "\"" << std::endl;
-		return false;
-	}
-
-	// If name is not in a supported format, ignore it
-	const char *supported_ext[] = {
-		".png", ".jpg", ".tga",
-		".ogg",
-		".x", ".b3d", ".obj", ".gltf", ".glb",
-		// Translation file formats
-		".tr", ".po", ".mo",
-		// Fonts
-		".ttf", ".woff",
-		nullptr
-	};
-	if (removeStringEnd(filename, supported_ext).empty()) {
-		infostream << "Server: ignoring unsupported file extension: \""
-				<< filename << "\"" << std::endl;
-		return false;
-	}
-	// Ok, attempt to load the file and add to cache
-
-	// Read data
-	std::string filedata;
-	if (!fs::ReadFile(filepath, filedata, true)) {
-		return false;
-	}
-
-	if (filedata.empty()) {
-		errorstream << "Server::addMediaFile(): Empty file \""
-				<< filepath << "\"" << std::endl;
-		return false;
-	}
-	if (filedata.size() > MEDIAFILE_MAX_SIZE) {
-		errorstream << "Server::addMediaFile(): \""
-				<< filepath << "\" is too big (" << (filedata.size() >> 10)
-				<< "KiB). The internal limit is " << (MEDIAFILE_MAX_SIZE >> 10) << "KiB." << std::endl;
-		return false;
-	}
-
-	std::string sha1 = hashing::sha1(filedata);
-	std::string sha1_hex = hex_encode(sha1);
-	if (digest_to)
-		*digest_to = sha1;
-
-	// Put in list
-	m_media.insert_or_assign(filename, MediaInfo(filepath, sha1));
-	verbosestream << "Server: " << sha1_hex << " is " << filename
-			<< " (" << (filedata.size() >> 10) << "KiB)" << std::endl;
-
-	// Invalidate cached translations if we just added a translation file
-	if (Translations::isTranslationFile(filename)) {
-		// (could be optimized to clear only the relevant one, but not critical here)
-		server_translations.clear();
-	}
-
-	if (filedata_to)
-		*filedata_to = std::move(filedata);
 	return true;
 }
 
@@ -3355,18 +3324,20 @@ RemoteClient *Server::getClientNoEx(session_t peer_id, ClientState state_min)
 
 std::string Server::getPlayerName(session_t peer_id)
 {
-	RemotePlayer *player = m_env->getPlayer(peer_id);
-	if (!player)
-		return "[id="+itos(peer_id)+"]";
-	return player->getName();
+	for (auto &it : m_world_environments) {
+		if (RemotePlayer *player = it.second->getPlayer(peer_id))
+			return player->getName();
+	}
+	return "[id="+itos(peer_id)+"]";
 }
 
 PlayerSAO *Server::getPlayerSAO(session_t peer_id)
 {
-	RemotePlayer *player = m_env->getPlayer(peer_id);
-	if (!player)
-		return NULL;
-	return player->getPlayerSAO();
+	for (auto &it : m_world_environments) {
+		if (RemotePlayer *player = it.second->getPlayer(peer_id))
+			return player->getPlayerSAO();
+	}
+	return nullptr;
 }
 
 std::string Server::getStatusString()
@@ -4199,6 +4170,9 @@ void Server::requestShutdown(const std::string &msg, bool reconnect, float delay
 std::unique_ptr<PlayerSAO> Server::emergePlayer(const char *name, session_t peer_id,
 	u16 proto_version)
 {
+	if (ServerEnvironment *player_env = getPlayerEnvironment(name))
+		m_env = player_env;
+
 	/*
 		Try to get an existing player
 	*/
@@ -4530,102 +4504,112 @@ bool Server::migrateModStorageDatabase(const GameParams &game_params, const Sett
 	return succeeded;
 }
 
+ServerEnvironment *Server::getWorldEnvironment(const std::string &name)
+{
+	if (name == "overworld")
+		return m_env;
+
+	auto it = m_world_environments.find(name);
+	if (it != m_world_environments.end())
+		return it->second.get();
+
+	auto wit = m_world_instances.find(name);
+	if (wit == m_world_instances.end())
+		return nullptr;
+
+	try {
+		auto map = std::make_unique<ServerMap>(wit->second->path, this,
+				m_emerge.get(), m_metrics_backend.get());
+		auto env = std::make_unique<ServerEnvironment>(std::move(map), this,
+				m_metrics_backend.get(), wit->second->path);
+		env->init();
+		env->loadMeta();
+		ServerEnvironment *result = env.get();
+		m_world_environments.emplace(name, std::move(env));
+		return result;
+	} catch (const std::exception &e) {
+		errorstream << "Failed to load world " << name << ": " << e.what() << std::endl;
+		return nullptr;
+	}
+}
+
+ServerEnvironment *Server::getPlayerEnvironment(const std::string &playername)
+{
+	auto it = m_player_subworld_states.find(playername);
+	const std::string name = it == m_player_subworld_states.end() ?
+			"overworld" : it->second.current_subworld;
+	return getWorldEnvironment(name);
+}
+
 bool Server::createSubWorld(const std::string &name)
 {
-	if (name.empty() || name == "." || name == ".." || name == "overworld" ||
-		name.find('/') != std::string::npos || name.find('\\') != std::string::npos)
+	if (!isValidSubWorldName(name) || name == "overworld")
 		return false;
+
 	const std::string path = m_path_world + DIR_DELIM + name;
 	if (isSubWorldDir(path)) {
-		Settings old_conf;
-		const std::string mt = path + DIR_DELIM + "world.mt";
-		if (old_conf.readConfigFile(mt.c_str()) && old_conf.exists("subworld_offset_x") &&
-				std::abs((int)old_conf.getS16("subworld_offset_x")) > 2400) {
-			old_conf.setS16("subworld_offset_x", 1200);
-			old_conf.updateConfigFile(mt.c_str());
-		}
+		m_world_instances.emplace(name,
+				std::make_unique<WorldInstance>(name, path));
 		return true;
 	}
-	if (fs::PathExists(path)) return false;
-	if (!fs::CreateDir(path)) return false;
-	// Keep the physical map position inside Luanti's signed-16-bit mapblock range.
-	// 1200 blocks = 19200 nodes, leaving room around the origin.
-	s16 offset = 1200;
-	for (const auto &node : fs::GetDirListing(m_path_world)) {
-		if (!node.dir || node.name.empty() || node.name[0] == '.' || node.name == name)
-			continue;
-		const std::string mt = m_path_world + DIR_DELIM + node.name + DIR_DELIM + "world.mt";
-		Settings conf;
-		if (!conf.readConfigFile(mt.c_str()) || !conf.exists("subworld_offset_x"))
-			continue;
-		s16 used = conf.getS16("subworld_offset_x");
-		if (std::abs((int)used - (int)offset) < 900)
-			offset = (s16)(offset + 1200);
-	}
-	if (offset <= 0 || offset > 2400) {
-		fs::DeleteSingleFileOrEmptyDirectory(path, true);
+	if (fs::PathExists(path) || !fs::CreateDir(path))
 		return false;
-	}
+
 	const std::string worldmt = path + DIR_DELIM + "world.mt";
 	std::ostringstream conf;
 	conf << "gameid = minetest\n"
 		  << "backend = sqlite3\n"
-		  << "subworld = true\n"
-		  << "subworld_offset_x = " << offset << "\n";
+		  << "subworld = true\n";
 	if (!fs::safeWriteToFile(worldmt, conf.str())) {
 		fs::DeleteSingleFileOrEmptyDirectory(path, true);
 		return false;
 	}
-	return m_env->getServerMap().createSubWorldDatabase(name, offset);
+
+	m_world_instances.emplace(name,
+			std::make_unique<WorldInstance>(name, path));
+	return true;
 }
 
 bool Server::transferPlayer(const std::string &playername, const std::string &subworld_name, v3f pos)
 {
-	PlayerSAO *sao = nullptr;
-	for (session_t peer_id : m_clients.getClientIDs()) {
-		RemoteClient *client = getClient(peer_id);
-		if (client && client->getName() == playername) {
-			sao = getPlayerSAO(peer_id);
-			break;
-		}
-	}
-	if (!sao)
+	if (!isValidSubWorldName(subworld_name))
 		return false;
-	if (subworld_name != "overworld" &&
-		!isSubWorldDir(m_path_world + DIR_DELIM + subworld_name))
+
+	ServerEnvironment *source_env = getPlayerEnvironment(playername);
+	if (!source_env || !getWorldEnvironment(subworld_name))
+		return false;
+
+	RemotePlayer *player = source_env->getPlayer(playername.c_str());
+	if (!player)
+		return false;
+
+	PlayerSAO *sao = player->getPlayerSAO();
+	if (!sao)
 		return false;
 
 	auto &state = m_player_subworld_states[playername];
-	const std::string from = state.current_subworld.empty() ? "overworld" : state.current_subworld;
-
-	// Save the player's local position in the current world.
-	v3f local_pos = sao->getBasePosition();
-	if (from != "overworld") {
-		Settings from_conf;
-		const std::string from_mt = m_path_world + DIR_DELIM + from + DIR_DELIM + "world.mt";
-		if (!from_conf.readConfigFile(from_mt.c_str()) || !from_conf.exists("subworld_offset_x"))
-			return false;
-		local_pos.X -= (f32)from_conf.getS16("subworld_offset_x") * MAP_BLOCKSIZE;
-	}
-	state.positions[from] = local_pos;
-
-	// Convert the requested local position into the physical map position.
-	v3f physical_pos = pos;
-	if (subworld_name != "overworld") {
-		Settings conf;
-		const std::string mt = m_path_world + DIR_DELIM + subworld_name + DIR_DELIM + "world.mt";
-		if (!conf.readConfigFile(mt.c_str()) || !conf.exists("subworld_offset_x"))
-			return false;
-		physical_pos.X += (f32)conf.getS16("subworld_offset_x") * MAP_BLOCKSIZE;
-	}
-
-	if (from != subworld_name)
-		m_env->getServerMap().switchSubWorldCache();
-
+	const std::string old_world = state.current_subworld;
 	state.current_subworld = subworld_name;
 	state.positions[subworld_name] = pos;
-	sao->setBasePosition(physical_pos);
-	sao->setPos(physical_pos);
+
+	const std::string state_path = m_path_world + DIR_DELIM + "multiworld_players.mt";
+	Settings states;
+	states.readConfigFile(state_path.c_str());
+	states.set(playername, subworld_name);
+	if (!states.updateConfigFile(state_path.c_str())) {
+		errorstream << "Failed to save multiworld destination for " << playername << std::endl;
+		state.current_subworld = old_world;
+		return false;
+	}
+
+	sao->setBasePosition(pos);
+	sao->setPos(pos);
+	source_env->saveLoadedPlayers();
+
+	// Reconnect only this player. No PlayerSAO is moved between environments.
+	m_env = source_env;
+	DenyAccess(player->getPeerId(), SERVER_ACCESSDENIED_CUSTOM_STRING,
+			"Switching to world " + subworld_name, true);
 	return true;
 }
 

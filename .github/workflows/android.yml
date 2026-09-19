@@ -2,7 +2,7 @@ name: android
 
 on:
   push:
-    branches: [workshop47, workshop47-multiworld]
+    branches: [workshop47, workshop47-multiworld, multiworld-rebuild-safe]
   pull_request:
     branches: [workshop47, workshop47-multiworld]
 
@@ -94,3 +94,5 @@ jobs:
         with:
           name: Luanti-arm64-v8a.apk
           path: android/app/build/outputs/apk/release/app-arm64-v8a-release-unsigned.apk
+
+# Multiworld rebuild CI trigger

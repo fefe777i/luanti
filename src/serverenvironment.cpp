@@ -177,8 +177,9 @@ void OnMapblocksChangedReceiver::onMapEditEvent(const MapEditEvent &event)
 */
 
 ServerEnvironment::ServerEnvironment(std::unique_ptr<ServerMap> map,
-		Server *server, MetricsBackend *mb):
+		Server *server, MetricsBackend *mb, const std::string &world_path):
 	Environment(server),
+	m_world_path(world_path.empty() ? server->getWorldPath() : world_path),
 	m_map(std::move(map)),
 	m_script(server->getScriptIface()),
 	m_server(server)
@@ -201,7 +202,7 @@ ServerEnvironment::ServerEnvironment(std::unique_ptr<ServerMap> map,
 void ServerEnvironment::init()
 {
 	// Determine which database backend to use
-	const std::string world_path = m_server->getWorldPath();
+	const std::string &world_path = m_world_path;
 	const std::string conf_path = world_path + DIR_DELIM "world.mt";
 	Settings conf;
 
@@ -360,6 +361,23 @@ void ServerEnvironment::addPlayer(RemotePlayer *player)
 	m_players.push_back(player);
 }
 
+RemotePlayer *ServerEnvironment::detachPlayer(const std::string &name)
+{
+	for (auto it = m_players.begin(); it != m_players.end(); ++it) {
+		if ((*it)->getName() == name) {
+			RemotePlayer *player = *it;
+			m_players.erase(it);
+			return player;
+		}
+	}
+	return nullptr;
+}
+
+std::unique_ptr<ServerActiveObject> ServerEnvironment::takeActiveObject(u16 id)
+{
+	return m_ao_manager.takeObject(id);
+}
+
 void ServerEnvironment::removePlayer(RemotePlayer *player)
 {
 	for (auto it = m_players.begin(); it != m_players.end(); ++it) {
@@ -439,7 +457,7 @@ void ServerEnvironment::saveMeta()
 	if (!m_meta_loaded)
 		return;
 
-	std::string path = m_server->getWorldPath() + DIR_DELIM "env_meta.txt";
+	std::string path = m_world_path + DIR_DELIM "env_meta.txt";
 
 	// Open file and serialize
 	std::ostringstream ss(std::ios_base::binary);
@@ -470,7 +488,7 @@ void ServerEnvironment::loadMeta()
 	// This has nothing to do with this method but it's nice to know
 	infostream << "ServerEnvironment: " << m_abms.size() << " ABMs are registered" << std::endl;
 
-	std::string path = m_server->getWorldPath() + DIR_DELIM "env_meta.txt";
+	std::string path = m_world_path + DIR_DELIM "env_meta.txt";
 
 	// If file doesn't exist, load default environment metadata
 	if (!fs::PathExists(path)) {

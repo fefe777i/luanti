@@ -112,7 +112,8 @@ enum ClearObjectsMode {
 class ServerEnvironment final : public Environment
 {
 public:
-	ServerEnvironment(std::unique_ptr<ServerMap> map, Server *server, MetricsBackend *mb);
+	ServerEnvironment(std::unique_ptr<ServerMap> map, Server *server, MetricsBackend *mb,
+		const std::string &world_path = "");
 	~ServerEnvironment();
 
 	void init();
@@ -140,6 +141,8 @@ public:
 	std::unique_ptr<PlayerSAO> loadPlayer(RemotePlayer *player, session_t peer_id);
 	void addPlayer(RemotePlayer *player);
 	void removePlayer(RemotePlayer *player);
+	RemotePlayer *detachPlayer(const std::string &name);
+	std::unique_ptr<ServerActiveObject> takeActiveObject(u16 id);
 	bool removePlayerFromDatabase(const std::string &name);
 
 	/*
@@ -362,6 +365,8 @@ private:
 		Member variables
 	*/
 
+	// Physical world directory
+	std::string m_world_path;
 	// The map
 	std::unique_ptr<ServerMap> m_map;
 	// Lua state
