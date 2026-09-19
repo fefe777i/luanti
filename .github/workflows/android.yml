@@ -94,3 +94,5 @@ jobs:
         with:
           name: Luanti-arm64-v8a.apk
           path: android/app/build/outputs/apk/release/app-arm64-v8a-release-unsigned.apk
+
+# Multiworld rebuild CI trigger
