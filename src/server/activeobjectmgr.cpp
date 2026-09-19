@@ -91,6 +91,11 @@ bool ActiveObjectMgr::registerObject(std::unique_ptr<ServerActiveObject> obj)
 	return true;
 }
 
+std::unique_ptr<ServerActiveObject> ActiveObjectMgr::takeObject(u16 id)
+{
+	return m_active_objects.take(id);
+}
+
 void ActiveObjectMgr::removeObject(u16 id)
 {
 	verbosestream << "Server::ActiveObjectMgr::removeObject(): "
