@@ -2,7 +2,7 @@ name: android
 
 on:
   push:
-    branches: [workshop47, workshop47-multiworld]
+    branches: [workshop47, workshop47-multiworld, multiworld-rebuild-safe]
   pull_request:
     branches: [workshop47, workshop47-multiworld]
 
