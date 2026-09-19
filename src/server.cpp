@@ -507,6 +507,21 @@ void Server::init()
 				std::make_unique<WorldInstance>(spec.name, spec.path));
 	}
 
+	// Restore persisted physical-world routing for reconnecting players.
+	{
+		Settings states;
+		const std::string state_path = m_path_world + DIR_DELIM + "multiworld_players.mt";
+		if (states.readConfigFile(state_path.c_str())) {
+			for (const std::string &playername : states.getNames()) {
+				std::string world;
+				if (!states.getNoEx(playername, world) || !isValidSubWorldName(world))
+					continue;
+				if (world == "overworld" || m_world_instances.find(world) != m_world_instances.end())
+					m_player_subworld_states[playername].current_subworld = world;
+			}
+		}
+	}
+
 	// Create emerge manager
 	m_emerge = std::make_unique<EmergeManager>(this, m_metrics_backend.get());
 
@@ -1270,6 +1285,8 @@ PlayerSAO *Server::StageTwoClientInit(session_t peer_id)
 		RemoteClient* client = m_clients.lockedGetClientNoEx(peer_id, CS_InitDone);
 		if (client) {
 			playername = client->getName();
+			if (ServerEnvironment *player_env = getPlayerEnvironment(playername))
+				m_env = player_env;
 			sao = emergePlayer(playername.c_str(), peer_id, client->net_proto_version);
 		}
 	}
@@ -4234,6 +4251,9 @@ void Server::requestShutdown(const std::string &msg, bool reconnect, float delay
 std::unique_ptr<PlayerSAO> Server::emergePlayer(const char *name, session_t peer_id,
 	u16 proto_version)
 {
+	if (ServerEnvironment *player_env = getPlayerEnvironment(name))
+		m_env = player_env;
+
 	/*
 		Try to get an existing player
 	*/
@@ -4567,8 +4587,31 @@ bool Server::migrateModStorageDatabase(const GameParams &game_params, const Sett
 
 ServerEnvironment *Server::getWorldEnvironment(const std::string &name)
 {
+	if (name == "overworld")
+		return m_env;
+
 	auto it = m_world_environments.find(name);
-	return it == m_world_environments.end() ? nullptr : it->second.get();
+	if (it != m_world_environments.end())
+		return it->second.get();
+
+	auto wit = m_world_instances.find(name);
+	if (wit == m_world_instances.end())
+		return nullptr;
+
+	try {
+		auto map = std::make_unique<ServerMap>(wit->second->path, this,
+				m_emerge.get(), m_metrics_backend.get());
+		auto env = std::make_unique<ServerEnvironment>(std::move(map), this,
+				m_metrics_backend.get(), wit->second->path);
+		env->init();
+		env->loadMeta();
+		ServerEnvironment *result = env.get();
+		m_world_environments.emplace(name, std::move(env));
+		return result;
+	} catch (const std::exception &e) {
+		errorstream << "Failed to load world " << name << ": " << e.what() << std::endl;
+		return nullptr;
+	}
 }
 
 ServerEnvironment *Server::getPlayerEnvironment(const std::string &playername)
@@ -4581,48 +4624,23 @@ ServerEnvironment *Server::getPlayerEnvironment(const std::string &playername)
 
 bool Server::createSubWorld(const std::string &name)
 {
-	if (name.empty() || name == "." || name == ".." || name == "overworld" ||
-		name.find('/') != std::string::npos || name.find('\\') != std::string::npos)
+	if (!isValidSubWorldName(name) || name == "overworld")
 		return false;
+
 	const std::string path = m_path_world + DIR_DELIM + name;
 	if (isSubWorldDir(path)) {
 		m_world_instances.emplace(name,
 				std::make_unique<WorldInstance>(name, path));
-		Settings old_conf;
-		const std::string mt = path + DIR_DELIM + "world.mt";
-		if (old_conf.readConfigFile(mt.c_str()) && old_conf.exists("subworld_offset_x") &&
-				std::abs((int)old_conf.getS16("subworld_offset_x")) > 2400) {
-			old_conf.setS16("subworld_offset_x", 1200);
-			old_conf.updateConfigFile(mt.c_str());
-		}
 		return true;
 	}
-	if (fs::PathExists(path)) return false;
-	if (!fs::CreateDir(path)) return false;
-	// Keep the physical map position inside Luanti's signed-16-bit mapblock range.
-	// 1200 blocks = 19200 nodes, leaving room around the origin.
-	s16 offset = 1200;
-	for (const auto &node : fs::GetDirListing(m_path_world)) {
-		if (!node.dir || node.name.empty() || node.name[0] == '.' || node.name == name)
-			continue;
-		const std::string mt = m_path_world + DIR_DELIM + node.name + DIR_DELIM + "world.mt";
-		Settings conf;
-		if (!conf.readConfigFile(mt.c_str()) || !conf.exists("subworld_offset_x"))
-			continue;
-		s16 used = conf.getS16("subworld_offset_x");
-		if (std::abs((int)used - (int)offset) < 900)
-			offset = (s16)(offset + 1200);
-	}
-	if (offset <= 0 || offset > 2400) {
-		fs::DeleteSingleFileOrEmptyDirectory(path, true);
+	if (fs::PathExists(path) || !fs::CreateDir(path))
 		return false;
-	}
+
 	const std::string worldmt = path + DIR_DELIM + "world.mt";
 	std::ostringstream conf;
 	conf << "gameid = minetest\n"
 		  << "backend = sqlite3\n"
-		  << "subworld = true\n"
-		  << "subworld_offset_x = " << offset << "\n";
+		  << "subworld = true\n";
 	if (!fs::safeWriteToFile(worldmt, conf.str())) {
 		fs::DeleteSingleFileOrEmptyDirectory(path, true);
 		return false;
@@ -4638,34 +4656,9 @@ bool Server::transferPlayer(const std::string &playername, const std::string &su
 	if (!isValidSubWorldName(subworld_name))
 		return false;
 
-	auto state_it = m_player_subworld_states.find(playername);
-	const std::string from = state_it == m_player_subworld_states.end() ?
-			"overworld" : state_it->second.current_subworld;
-
-	ServerEnvironment *source_env = getWorldEnvironment(from);
-	if (!source_env)
+	ServerEnvironment *source_env = getPlayerEnvironment(playername);
+	if (!source_env || !getWorldEnvironment(subworld_name))
 		return false;
-
-	ServerEnvironment *target_env = getWorldEnvironment(subworld_name);
-	if (!target_env) {
-		auto wit = m_world_instances.find(subworld_name);
-		if (wit == m_world_instances.end())
-			return false;
-		try {
-			auto map = std::make_unique<ServerMap>(wit->second->path, this,
-					m_emerge.get(), m_metrics_backend.get());
-			auto env = std::make_unique<ServerEnvironment>(std::move(map), this,
-					m_metrics_backend.get(), wit->second->path);
-			env->init();
-			env->loadMeta();
-			target_env = env.get();
-			m_world_environments.emplace(subworld_name, std::move(env));
-		} catch (const std::exception &e) {
-			errorstream << "Failed to load world " << subworld_name
-					<< ": " << e.what() << std::endl;
-			return false;
-		}
-	}
 
 	RemotePlayer *player = source_env->getPlayer(playername.c_str());
 	if (!player)
@@ -4675,46 +4668,29 @@ bool Server::transferPlayer(const std::string &playername, const std::string &su
 	if (!sao)
 		return false;
 
-	if (from == subworld_name) {
-		sao->setBasePosition(pos);
-		sao->setPos(pos);
-		return true;
-	}
+	auto &state = m_player_subworld_states[playername];
+	const std::string old_world = state.current_subworld;
+	state.current_subworld = subworld_name;
+	state.positions[subworld_name] = pos;
 
-	const u16 sao_id = sao->getId();
-	std::unique_ptr<ServerActiveObject> object = source_env->takeActiveObject(sao_id);
-	if (!object || object.get() != sao)
-		return false;
-
-	RemotePlayer *detached_player = source_env->detachPlayer(playername);
-	if (!detached_player) {
-		source_env->addActiveObject(std::move(object));
+	const std::string state_path = m_path_world + DIR_DELIM + "multiworld_players.mt";
+	Settings states;
+	states.readConfigFile(state_path.c_str());
+	states.set(playername, subworld_name);
+	if (!states.updateConfigFile(state_path.c_str())) {
+		errorstream << "Failed to save multiworld destination for " << playername << std::endl;
+		state.current_subworld = old_world;
 		return false;
 	}
 
-	object->setEnv(target_env);
-	object->setBasePosition(pos);
-	object->setPos(pos);
+	sao->setBasePosition(pos);
+	sao->setPos(pos);
+	source_env->saveLoadedPlayers();
 
-	if (target_env->getPlayer(playername.c_str()) != nullptr) {
-		source_env->addPlayer(detached_player);
-		object->setEnv(source_env);
-		source_env->addActiveObject(std::move(object));
-		return false;
-	}
-
-	target_env->addPlayer(detached_player);
-	if (!target_env->addActiveObject(std::move(object))) {
-		target_env->removePlayer(detached_player);
-		source_env->addPlayer(detached_player);
-		return false;
-	}
-
-	m_env = target_env;
-	m_player_subworld_states[playername].current_subworld = subworld_name;
-	m_player_subworld_states[playername].positions[subworld_name] = pos;
-
-	SendMovePlayer(detached_player->getPlayerSAO());
+	// Reconnect only this player. No PlayerSAO is moved between environments.
+	m_env = source_env;
+	DenyAccess(player->getPeerId(), SERVER_ACCESSDENIED_CUSTOM_STRING,
+			"Switching to world " + subworld_name, true);
 	return true;
 }
 
