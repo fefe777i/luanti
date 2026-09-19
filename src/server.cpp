@@ -751,7 +751,11 @@ void Server::AsyncRunStep(float dtime, bool initial_step)
 		m_env->reportMaxLagEstimate(max_lag);
 
 		// Step environment
-		m_env->step(dtime);
+		for (auto &it : m_world_environments) {
+			m_env = it.second.get();
+			m_env->step(dtime);
+		}
+		m_env = getWorldEnvironment("overworld");
 	}
 
 	static const float map_timer_and_unload_dtime = 2.92;
@@ -768,7 +772,11 @@ void Server::AsyncRunStep(float dtime, bool initial_step)
 	/*
 		Note: Orphan MapBlock ptrs become dangling after this call.
 	*/
-	m_env->getServerMap().step();
+	for (auto &it : m_world_environments) {
+		m_env = it.second.get();
+		m_env->getServerMap().step();
+	}
+	m_env = getWorldEnvironment("overworld");
 
 	/*
 		Listen to the admin chat, if available
