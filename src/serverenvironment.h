@@ -112,7 +112,7 @@ enum ClearObjectsMode {
 class ServerEnvironment final : public Environment
 {
 public:
-	ServerEnvironment(std::unique_ptr<ServerMap> map, Server *server, MetricsBackend *mb);
+	ServerEnvironment(std::unique_ptr<ServerMap> map, Server *server, MetricsBackend *mb,\n\t\tconst std::string &world_path = "");
 	~ServerEnvironment();
 
 	void init();
