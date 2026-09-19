@@ -480,6 +480,9 @@ public:
 	// coordinate offsets.
 	std::unordered_map<std::string, std::unique_ptr<WorldInstance>> m_world_instances;
 
+	// Runtime environments for each physical world directory.
+	std::unordered_map<std::string, std::unique_ptr<ServerEnvironment>> m_world_environments;
+
 	// Data transferred into other Lua envs at init time
 	std::unique_ptr<PackedValue> m_lua_globals_data;
 
