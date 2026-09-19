@@ -177,8 +177,9 @@ void OnMapblocksChangedReceiver::onMapEditEvent(const MapEditEvent &event)
 */
 
 ServerEnvironment::ServerEnvironment(std::unique_ptr<ServerMap> map,
-		Server *server, MetricsBackend *mb):
+		Server *server, MetricsBackend *mb, const std::string &world_path):
 	Environment(server),
+	m_world_path(world_path.empty() ? server->getWorldPath() : world_path),
 	m_map(std::move(map)),
 	m_script(server->getScriptIface()),
 	m_server(server)
@@ -487,7 +488,7 @@ void ServerEnvironment::loadMeta()
 	// This has nothing to do with this method but it's nice to know
 	infostream << "ServerEnvironment: " << m_abms.size() << " ABMs are registered" << std::endl;
 
-	std::string path = m_server->getWorldPath() + DIR_DELIM "env_meta.txt";
+	std::string path = m_world_path + DIR_DELIM "env_meta.txt";
 
 	// If file doesn't exist, load default environment metadata
 	if (!fs::PathExists(path)) {
