@@ -28,7 +28,8 @@
 #include <optional>
 #include <string_view>
 #include <shared_mutex>
-#include <condition_variable>\n#include <memory>
+#include <condition_variable>
+#include <memory>
 
 class BanManager;
 class ChatEvent;
@@ -472,7 +473,12 @@ public:
 	// Identical but for mapgen env
 	std::vector<std::pair<std::string, std::string>> m_mapgen_init_files;
 
-	std::unordered_map<std::string, PlayerSubWorldState> m_player_subworld_states;\n\n\t// Registry of physical world instances. Each entry represents a separate\n\t// world directory; player routing will select the instance without using\n\t// coordinate offsets.\n\tstd::unordered_map<std::string, std::unique_ptr<WorldInstance>> m_world_instances;
+	std::unordered_map<std::string, PlayerSubWorldState> m_player_subworld_states;
+
+	// Registry of physical world instances. Each entry represents a separate
+	// world directory; player routing will select the instance without using
+	// coordinate offsets.
+	std::unordered_map<std::string, std::unique_ptr<WorldInstance>> m_world_instances;
 
 	// Data transferred into other Lua envs at init time
 	std::unique_ptr<PackedValue> m_lua_globals_data;
