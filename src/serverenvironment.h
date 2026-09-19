@@ -113,7 +113,7 @@ class ServerEnvironment final : public Environment
 {
 public:
 	ServerEnvironment(std::unique_ptr<ServerMap> map, Server *server, MetricsBackend *mb,
-	\tconst std::string &world_path = "");
+		const std::string &world_path = "");
 	~ServerEnvironment();
 
 	void init();
