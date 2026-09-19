@@ -2632,65 +2632,60 @@ void Server::SendBlocks(float dtime)
 	EnvAutoLock envlock(this);
 
 	std::vector<PrioritySortedBlockTransfer> queue;
-
 	u32 total_sending = 0, unique_clients = 0;
 
 	{
 		ScopeProfiler sp2(g_profiler, "Server::SendBlocks(): Collect list");
-
 		std::vector<session_t> clients = m_clients.getClientIDs();
-
 		ClientInterface::AutoLock clientlock(m_clients);
+
 		for (const session_t client_id : clients) {
 			RemoteClient *client = m_clients.lockedGetClientNoEx(client_id, CS_Active);
-
 			if (!client)
+				continue;
+
+			ServerEnvironment *env = getPlayerEnvironment(client->getName());
+			if (!env)
 				continue;
 
 			total_sending += client->getSendingCount();
 			const auto old_count = queue.size();
-			client->GetNextBlocks(m_env, m_emerge.get(), dtime, queue);
+			client->GetNextBlocks(env, m_emerge.get(), dtime, queue);
 			unique_clients += queue.size() > old_count ? 1 : 0;
 		}
 	}
 
-	// Sort.
-	// Lowest priority number comes first.
-	// Lowest is most important.
 	std::sort(queue.begin(), queue.end());
 
 	ClientInterface::AutoLock clientlock(m_clients);
-
-	// Maximal total count calculation
-	// The per-client block sends is halved with the maximal online users
-	u32 max_blocks_to_send = (m_env->getPlayerCount() + g_settings->getU32("max_users")) *
+	const u32 max_blocks_to_send =
+		(m_clients.getClientIDs().size() + g_settings->getU32("max_users")) *
 		g_settings->getU32("max_simultaneous_block_sends_per_client") / 4 + 1;
 
 	ScopeProfiler sp(g_profiler, "Server::SendBlocks(): Send to clients");
-	Map &map = m_env->getMap();
-
 	SerializedBlockCache cache, *cache_ptr = nullptr;
-	if (unique_clients > 1) {
-		// caching is pointless with a single client
+	if (unique_clients > 1)
 		cache_ptr = &cache;
-	}
 
 	for (const PrioritySortedBlockTransfer &block_to_send : queue) {
 		if (total_sending >= max_blocks_to_send)
 			break;
 
-		MapBlock *block = map.getBlockNoCreateNoEx(block_to_send.pos);
-		if (!block)
+		RemoteClient *client = m_clients.lockedGetClientNoEx(
+				block_to_send.peer_id, CS_Active);
+		if (!client)
 			continue;
 
-		RemoteClient *client = m_clients.lockedGetClientNoEx(block_to_send.peer_id,
-				CS_Active);
-		if (!client)
+		ServerEnvironment *env = getPlayerEnvironment(client->getName());
+		if (!env)
+			continue;
+
+		MapBlock *block = env->getMap().getBlockNoCreateNoEx(block_to_send.pos);
+		if (!block)
 			continue;
 
 		SendBlockNoLock(block_to_send.peer_id, block, client->serialization_version,
 				client->net_proto_version, cache_ptr);
-
 		client->SentBlock(block_to_send.pos);
 		total_sending++;
 	}
@@ -2698,85 +2693,25 @@ void Server::SendBlocks(float dtime)
 
 bool Server::SendBlock(session_t peer_id, const v3s16 &blockpos)
 {
-	MapBlock *block = m_env->getMap().getBlockNoCreateNoEx(blockpos);
+	RemoteClient *client = getClient(peer_id, CS_Active);
+	if (!client)
+		return false;
+
+	ServerEnvironment *env = getPlayerEnvironment(client->getName());
+	if (!env)
+		return false;
+
+	MapBlock *block = env->getMap().getBlockNoCreateNoEx(blockpos);
 	if (!block)
 		return false;
 
 	ClientInterface::AutoLock clientlock(m_clients);
-	RemoteClient *client = m_clients.lockedGetClientNoEx(peer_id, CS_Active);
+	client = m_clients.lockedGetClientNoEx(peer_id, CS_Active);
 	if (!client || client->isBlockSent(blockpos))
 		return false;
+
 	SendBlockNoLock(peer_id, block, client->serialization_version,
 			client->net_proto_version);
-
-	return true;
-}
-
-bool Server::addMediaFile(const std::string &filename,
-	const std::string &filepath, std::string *filedata_to,
-	std::string *digest_to)
-{
-	// If name contains illegal characters, ignore the file
-	if (!string_allowed(filename, TEXTURENAME_ALLOWED_CHARS)) {
-		warningstream << "Server: ignoring file as it has disallowed characters: \""
-				<< filename << "\"" << std::endl;
-		return false;
-	}
-
-	// If name is not in a supported format, ignore it
-	const char *supported_ext[] = {
-		".png", ".jpg", ".tga",
-		".ogg",
-		".x", ".b3d", ".obj", ".gltf", ".glb",
-		// Translation file formats
-		".tr", ".po", ".mo",
-		// Fonts
-		".ttf", ".woff",
-		nullptr
-	};
-	if (removeStringEnd(filename, supported_ext).empty()) {
-		infostream << "Server: ignoring unsupported file extension: \""
-				<< filename << "\"" << std::endl;
-		return false;
-	}
-	// Ok, attempt to load the file and add to cache
-
-	// Read data
-	std::string filedata;
-	if (!fs::ReadFile(filepath, filedata, true)) {
-		return false;
-	}
-
-	if (filedata.empty()) {
-		errorstream << "Server::addMediaFile(): Empty file \""
-				<< filepath << "\"" << std::endl;
-		return false;
-	}
-	if (filedata.size() > MEDIAFILE_MAX_SIZE) {
-		errorstream << "Server::addMediaFile(): \""
-				<< filepath << "\" is too big (" << (filedata.size() >> 10)
-				<< "KiB). The internal limit is " << (MEDIAFILE_MAX_SIZE >> 10) << "KiB." << std::endl;
-		return false;
-	}
-
-	std::string sha1 = hashing::sha1(filedata);
-	std::string sha1_hex = hex_encode(sha1);
-	if (digest_to)
-		*digest_to = sha1;
-
-	// Put in list
-	m_media.insert_or_assign(filename, MediaInfo(filepath, sha1));
-	verbosestream << "Server: " << sha1_hex << " is " << filename
-			<< " (" << (filedata.size() >> 10) << "KiB)" << std::endl;
-
-	// Invalidate cached translations if we just added a translation file
-	if (Translations::isTranslationFile(filename)) {
-		// (could be optimized to clear only the relevant one, but not critical here)
-		server_translations.clear();
-	}
-
-	if (filedata_to)
-		*filedata_to = std::move(filedata);
 	return true;
 }
 
