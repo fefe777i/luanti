@@ -3388,18 +3388,20 @@ RemoteClient *Server::getClientNoEx(session_t peer_id, ClientState state_min)
 
 std::string Server::getPlayerName(session_t peer_id)
 {
-	RemotePlayer *player = m_env->getPlayer(peer_id);
-	if (!player)
-		return "[id="+itos(peer_id)+"]";
-	return player->getName();
+	for (auto &it : m_world_environments) {
+		if (RemotePlayer *player = it.second->getPlayer(peer_id))
+			return player->getName();
+	}
+	return "[id="+itos(peer_id)+"]";
 }
 
 PlayerSAO *Server::getPlayerSAO(session_t peer_id)
 {
-	RemotePlayer *player = m_env->getPlayer(peer_id);
-	if (!player)
-		return NULL;
-	return player->getPlayerSAO();
+	for (auto &it : m_world_environments) {
+		if (RemotePlayer *player = it.second->getPlayer(peer_id))
+			return player->getPlayerSAO();
+	}
+	return nullptr;
 }
 
 std::string Server::getStatusString()
