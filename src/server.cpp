@@ -897,8 +897,15 @@ void Server::AsyncRunStep(float dtime, bool initial_step)
 		ClientInterface::AutoLock clientlock(m_clients);
 		const RemoteClientMap &clients = m_clients.getClientList();
 
-		for (auto &world : m_world_environments) {
-			m_env = world.second.get();
+		std::vector<ServerEnvironment *> environments;
+		environments.push_back(getWorldEnvironment("overworld"));
+		for (auto &world : m_world_environments)
+			environments.push_back(world.second.get());
+
+		for (ServerEnvironment *environment : environments) {
+			if (!environment)
+				continue;
+			m_env = environment;
 			EnvAutoLock envlock(this);
 			m_env->invalidateActiveObjectObserverCaches();
 
