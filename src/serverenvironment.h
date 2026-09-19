@@ -140,6 +140,8 @@ public:
 	std::unique_ptr<PlayerSAO> loadPlayer(RemotePlayer *player, session_t peer_id);
 	void addPlayer(RemotePlayer *player);
 	void removePlayer(RemotePlayer *player);
+	RemotePlayer *detachPlayer(const std::string &name);
+	std::unique_ptr<ServerActiveObject> takeActiveObject(u16 id);
 	bool removePlayerFromDatabase(const std::string &name);
 
 	/*
