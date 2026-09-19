@@ -57,6 +57,16 @@ static inline bool isValidSubWorldName(const std::string &name)
 	return true;
 }
 
+struct WorldInstance {
+	std::string name;
+	std::string path;
+	bool loaded = false;
+
+	WorldInstance() = default;
+	WorldInstance(std::string name_, std::string path_):
+		name(std::move(name_)), path(std::move(path_)) {}
+};
+
 struct PlayerSubWorldState {
 	std::string current_subworld = "overworld";
 	std::unordered_map<std::string, v3f> positions;
