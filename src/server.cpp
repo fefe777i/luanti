@@ -894,29 +894,21 @@ void Server::AsyncRunStep(float dtime, bool initial_step)
 		Check added and deleted active objects
 	*/
 	{
-		//infostream<<"Server: Checking added and deleted active objects"<<std::endl;
-		EnvAutoLock envlock(this);
+		ClientInterface::AutoLock clientlock(m_clients);
+		const RemoteClientMap &clients = m_clients.getClientList();
 
-		// This guarantees that each object recomputes its cache only once per server step,
-		// unless get_effective_observers is called.
-		// If we were to update observer sets eagerly in set_observers instead,
-		// the total costs of calls to set_observers could theoretically be higher.
-		m_env->invalidateActiveObjectObserverCaches();
+		for (auto &world : m_world_environments) {
+			m_env = world.second.get();
+			EnvAutoLock envlock(this);
+			m_env->invalidateActiveObjectObserverCaches();
 
-		{
-			ClientInterface::AutoLock clientlock(m_clients);
-			const RemoteClientMap &clients = m_clients.getClientList();
-			ScopeProfiler sp(g_profiler, "Server: update objects within range");
-
-			m_player_gauge->set(clients.size());
 			for (const auto &client_it : clients) {
 				RemoteClient *client = client_it.second;
-
 				if (client->getState() < CS_DefinitionsSent)
 					continue;
 
-				// This can happen if the client times out somehow
-				if (!m_env->getPlayer(client->peer_id))
+				ServerEnvironment *player_env = getPlayerEnvironment(client->getName());
+				if (player_env != m_env)
 					continue;
 
 				PlayerSAO *playersao = getPlayerSAO(client->peer_id);
@@ -926,6 +918,9 @@ void Server::AsyncRunStep(float dtime, bool initial_step)
 				SendActiveObjectRemoveAdd(client, playersao);
 			}
 		}
+
+		// The main environment is not stored in m_world_environments.
+		m_env = getWorldEnvironment("overworld");
 
 		// Write changes to the mod storage
 		m_mod_storage_save_timer -= dtime;
@@ -940,101 +935,83 @@ void Server::AsyncRunStep(float dtime, bool initial_step)
 		Send object messages
 	*/
 	{
-		EnvAutoLock envlock(this);
-		ScopeProfiler sp(g_profiler, "Server: send SAO messages");
+		ClientInterface::AutoLock clientlock(m_clients);
+		const RemoteClientMap &clients = m_clients.getClientList();
 
-		// Key = object id
-		// Value = data sent by object
-		std::unordered_map<u16, std::vector<ActiveObjectMessage>*> buffered_messages;
+		for (auto &world : m_world_environments) {
+			m_env = world.second.get();
+			EnvAutoLock envlock(this);
 
-		// Get active object messages from environment
-		ActiveObjectMessage aom(0);
-		u32 count_reliable = 0, count_unreliable = 0;
-		for(;;) {
-			if (!m_env->getActiveObjectMessage(&aom))
-				break;
-			if (aom.reliable)
-				count_reliable++;
-			else
-				count_unreliable++;
+			std::unordered_map<u16, std::vector<ActiveObjectMessage>*> buffered_messages;
+			ActiveObjectMessage aom(0);
+			u32 count_reliable = 0, count_unreliable = 0;
 
-			std::vector<ActiveObjectMessage>* message_list = nullptr;
-			auto n = buffered_messages.find(aom.id);
-			if (n == buffered_messages.end()) {
-				message_list = new std::vector<ActiveObjectMessage>;
-				buffered_messages[aom.id] = message_list;
-			} else {
-				message_list = n->second;
+			for (;;) {
+				if (!m_env->getActiveObjectMessage(&aom))
+					break;
+				if (aom.reliable)
+					count_reliable++;
+				else
+					count_unreliable++;
+
+				auto n = buffered_messages.find(aom.id);
+				if (n == buffered_messages.end()) {
+					auto *list = new std::vector<ActiveObjectMessage>;
+					buffered_messages[aom.id] = list;
+					list->push_back(std::move(aom));
+				} else {
+					n->second->push_back(std::move(aom));
+				}
 			}
-			message_list->push_back(std::move(aom));
-		}
 
-		m_aom_buffer_counter[0]->increment(count_reliable);
-		m_aom_buffer_counter[1]->increment(count_unreliable);
+			m_aom_buffer_counter[0]->increment(count_reliable);
+			m_aom_buffer_counter[1]->increment(count_unreliable);
 
-		{
-			ClientInterface::AutoLock clientlock(m_clients);
-			const RemoteClientMap &clients = m_clients.getClientList();
-			// Route data to every client
-			std::string reliable_data, unreliable_data;
 			for (const auto &client_it : clients) {
-				reliable_data.clear();
-				unreliable_data.clear();
 				RemoteClient *client = client_it.second;
+				if (client->getState() < CS_DefinitionsSent)
+					continue;
+				if (getPlayerEnvironment(client->getName()) != m_env)
+					continue;
+
 				PlayerSAO *player = getPlayerSAO(client->peer_id);
-				// Go through all objects in message buffer
+				if (!player)
+					continue;
+
+				std::string reliable_data, unreliable_data;
 				for (const auto &buffered_message : buffered_messages) {
-					// If object does not exist or is not known by client, skip it
 					u16 id = buffered_message.first;
 					ServerActiveObject *sao = m_env->getActiveObject(id);
 					if (!sao || client->m_known_objects.find(id) == client->m_known_objects.end())
 						continue;
 
-					// Get message list of object
-					std::vector<ActiveObjectMessage>* list = buffered_message.second;
-					// Go through every message
-					for (const ActiveObjectMessage &aom : *list) {
-						const auto cmd = static_cast<ActiveObjectCommand>(aom.datastring[0]);
-
-						// Send position updates to players who do not see the attachment
+					for (const ActiveObjectMessage &msg : *buffered_message.second) {
+						const auto cmd = static_cast<ActiveObjectCommand>(msg.datastring[0]);
 						if (cmd == AO_CMD_UPDATE_POSITION) {
 							if (sao->getId() == player->getId())
 								continue;
-
-							// Do not send position updates for attached players
-							// as long the parent is known to the client
 							ServerActiveObject *parent = sao->getParent();
 							if (parent && client->m_known_objects.find(parent->getId()) !=
-									client->m_known_objects.end())
+								client->m_known_objects.end())
 								continue;
 						}
-
 						if (cmd >= AO_CMD_STOP_ANIMATION && client->net_proto_version < 52)
-							continue; // AO_CMD_STOP_ANIMATION added in protocol version 52
-
-						// Add full new data to appropriate buffer
-						std::string &buffer = aom.reliable ? reliable_data : unreliable_data;
-						aom.appendTo(buffer);
+							continue;
+						std::string &buffer = msg.reliable ? reliable_data : unreliable_data;
+						msg.appendTo(buffer);
 					}
 				}
-				/*
-					reliable_data and unreliable_data are now ready.
-					Send them.
-				*/
-				if (!reliable_data.empty()) {
+
+				if (!reliable_data.empty())
 					SendActiveObjectMessages(client->peer_id, reliable_data);
-				}
-
-				if (!unreliable_data.empty()) {
+				if (!unreliable_data.empty())
 					SendActiveObjectMessages(client->peer_id, unreliable_data, false);
-				}
 			}
+			for (auto &entry : buffered_messages)
+				delete entry.second;
 		}
 
-		// Clear buffered_messages
-		for (auto &buffered_message : buffered_messages) {
-			delete buffered_message.second;
-		}
+		m_env = getWorldEnvironment("overworld");
 	}
 
 	/*
