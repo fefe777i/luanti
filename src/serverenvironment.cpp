@@ -201,7 +201,7 @@ ServerEnvironment::ServerEnvironment(std::unique_ptr<ServerMap> map,
 void ServerEnvironment::init()
 {
 	// Determine which database backend to use
-	const std::string world_path = m_server->getWorldPath();
+	const std::string &world_path = m_world_path;
 	const std::string conf_path = world_path + DIR_DELIM "world.mt";
 	Settings conf;
 
@@ -439,7 +439,7 @@ void ServerEnvironment::saveMeta()
 	if (!m_meta_loaded)
 		return;
 
-	std::string path = m_server->getWorldPath() + DIR_DELIM "env_meta.txt";
+	std::string path = m_world_path + DIR_DELIM "env_meta.txt";
 
 	// Open file and serialize
 	std::ostringstream ss(std::ios_base::binary);
