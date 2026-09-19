@@ -351,6 +351,8 @@ public:
 	bool createSubWorld(const std::string &name);
 	bool transferPlayer(const std::string &playername, const std::string &subworld_name, v3f pos);
 	std::string getPlayerSubWorld(const std::string &playername);
+	ServerEnvironment *getWorldEnvironment(const std::string &name);
+	ServerEnvironment *getPlayerEnvironment(const std::string &playername);
 	std::vector<std::string> listSubWorlds();
 	std::string getModDataPath() const override { return m_path_mod_data; }
 	ModIPCStore *getModIPCStore() override { return &m_ipcstore; }
