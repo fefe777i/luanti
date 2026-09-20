@@ -2502,6 +2502,8 @@ void read_hud_element(lua_State *L, HudElement *elem)
 	elem->style = getintfield_default(L, 2, "style", 0);
 
 	elem->hideable = getboolfield_default(L, 2, "hideable", true);
+	// Tapping a touchable image sends its name to core.register_on_hud_touch
+	elem->touchable = getboolfield_default(L, 2, "touchable", false);
 
 	/* check for known deprecated element usage */
 	if ((elem->type  == HUD_ELEM_STATBAR) && (elem->size == v2f()))
@@ -2571,6 +2573,9 @@ void push_hud_element(lua_State *L, HudElement *elem)
 
 	lua_pushboolean(L, elem->hideable);
 	lua_setfield(L, -2, "hideable");
+
+	lua_pushboolean(L, elem->touchable);
+	lua_setfield(L, -2, "touchable");
 }
 
 bool read_hud_change(lua_State *L, HudElementStat &stat, HudElement *elem, void **value)
