@@ -78,6 +78,12 @@ end
 
 -- Keep the forceloaded areas after restart
 local wpath = core.get_worldpath()
+-- Every dimension has its own forceloaded blocks
+local force_file = wpath .. "/force_loaded"
+if core.get_current_dimension() ~= "overworld" then
+	force_file = force_file .. "_" .. core.get_current_dimension()
+end
+force_file = force_file .. ".txt"
 local function read_file(filename)
 	local f = io.open(filename, "r")
 	if f==nil then return {} end
@@ -87,7 +93,7 @@ local function read_file(filename)
 	return core.deserialize(t) or {}
 end
 
-blocks_forceloaded = read_file(wpath.."/force_loaded.txt")
+blocks_forceloaded = read_file(force_file)
 for _, __ in pairs(blocks_forceloaded) do
 	total_forceloaded = total_forceloaded + 1
 end
@@ -102,7 +108,7 @@ end)
 -- persists the currently forceloaded blocks to disk
 local function persist_forceloaded_blocks()
 	local data = core.serialize(blocks_forceloaded)
-	core.safe_file_write(wpath.."/force_loaded.txt", data)
+	core.safe_file_write(force_file, data)
 end
 
 -- periodical forceload persistence

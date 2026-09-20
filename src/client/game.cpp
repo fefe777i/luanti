@@ -510,7 +510,9 @@ void Game::run()
 
 	while (m_rendering_engine->run()
 			&& !(*kill || g_gamecallback->shutdown_requested
-			|| (server && server->isShutdownRequested()))) {
+			|| (server && (server->isShutdownRequested()
+				|| server->isDimensionSwitchRequested()))
+			|| (client && client->hasTransferRequest()))) {
 
 		framemarker.end();
 
@@ -599,6 +601,15 @@ void Game::run()
 	}
 
 	framemarker.end();
+
+	// Left the loop because of a dimension switch: tell the launcher to restart
+	if (server && server->isDimensionSwitchRequested())
+		errordata->dimension_switch_requested = true;
+
+	// ... or because the server sent us to another server (another dimension)
+	if (client && client->getTransferRequest(errordata->transfer_address,
+			errordata->transfer_port))
+		errordata->transfer_requested = true;
 
 #ifdef __ANDROID__
 	porting::setPlayingNowNotification(false);

@@ -680,6 +680,100 @@ int ModApiServer::l_serialize_roundtrip(lua_State *L)
 	return 1;
 }
 
+// get_current_dimension()
+int ModApiServer::l_get_current_dimension(lua_State *L)
+{
+	NO_MAP_LOCK_REQUIRED;
+	lua_pushstring(L, getServer(L)->getCurrentDimension().c_str());
+	return 1;
+}
+
+// get_dimension_path()
+int ModApiServer::l_get_dimension_path(lua_State *L)
+{
+	NO_MAP_LOCK_REQUIRED;
+	lua_pushstring(L, getServer(L)->getDimensionPath().c_str());
+	return 1;
+}
+
+// list_dimensions()
+int ModApiServer::l_list_dimensions(lua_State *L)
+{
+	NO_MAP_LOCK_REQUIRED;
+	const auto list = getServer(L)->listDimensions();
+	lua_createtable(L, list.size(), 0);
+	int i = 1;
+	for (const auto &name : list) {
+		lua_pushstring(L, name.c_str());
+		lua_rawseti(L, -2, i++);
+	}
+	return 1;
+}
+
+// create_dimension(name[, map_settings]) -> true | false, error
+int ModApiServer::l_create_dimension(lua_State *L)
+{
+	NO_MAP_LOCK_REQUIRED;
+	std::string name = luaL_checkstring(L, 1);
+
+	std::vector<std::pair<std::string, std::string>> settings;
+	if (lua_istable(L, 2)) {
+		lua_pushnil(L);
+		while (lua_next(L, 2) != 0) {
+			// key at -2, value at -1; only string keys are accepted
+			if (lua_type(L, -2) == LUA_TSTRING && lua_isstring(L, -1)) {
+				settings.emplace_back(lua_tostring(L, -2), lua_tostring(L, -1));
+			}
+			lua_pop(L, 1);
+		}
+	}
+
+	std::string error;
+	if (getServer(L)->createDimension(name, settings, error)) {
+		lua_pushboolean(L, true);
+		return 1;
+	}
+	lua_pushboolean(L, false);
+	lua_pushstring(L, error.c_str());
+	return 2;
+}
+
+// switch_dimension(name) -> true | false, error
+int ModApiServer::l_switch_dimension(lua_State *L)
+{
+	NO_MAP_LOCK_REQUIRED;
+	std::string name = luaL_checkstring(L, 1);
+
+	std::string error;
+	if (getServer(L)->requestDimensionSwitch(name, error)) {
+		lua_pushboolean(L, true);
+		return 1;
+	}
+	lua_pushboolean(L, false);
+	lua_pushstring(L, error.c_str());
+	return 2;
+}
+
+// transfer_player(name, address, port) -> true | false, error
+int ModApiServer::l_transfer_player(lua_State *L)
+{
+	NO_MAP_LOCK_REQUIRED;
+	std::string name = luaL_checkstring(L, 1);
+	std::string address = lua_isstring(L, 2) ? lua_tostring(L, 2) : "";
+	lua_Integer port = luaL_checkinteger(L, 3);
+
+	std::string error;
+	if (port < 1 || port > 65535)
+		error = "invalid port";
+	else if (getServer(L)->transferPlayer(name, address, (u16)port, error)) {
+		lua_pushboolean(L, true);
+		return 1;
+	}
+	lua_pushboolean(L, false);
+	lua_pushstring(L, error.c_str());
+	return 2;
+}
+
 void ModApiServer::Initialize(lua_State *L, int top)
 {
 	API_FCT(request_shutdown);
@@ -689,6 +783,13 @@ void ModApiServer::Initialize(lua_State *L, int top)
 	API_FCT(get_mod_data_path);
 	API_FCT(get_worldpath);
 	API_FCT(is_singleplayer);
+
+	API_FCT(get_current_dimension);
+	API_FCT(get_dimension_path);
+	API_FCT(list_dimensions);
+	API_FCT(create_dimension);
+	API_FCT(switch_dimension);
+	API_FCT(transfer_player);
 
 	API_FCT(get_current_modname);
 	API_FCT(get_modpath);

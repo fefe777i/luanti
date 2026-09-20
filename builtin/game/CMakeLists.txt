@@ -6,6 +6,7 @@ set(BUILTIN_GAME_SRCS
 	game/death_screen.lua
 	game/deprecated.lua
 	game/detached_inventory.lua
+	game/dimensions.lua
 	game/falling.lua
 	game/features.lua
 	game/forceloading.lua

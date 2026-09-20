@@ -4,7 +4,9 @@
 
 #pragma once
 
+#include <memory>
 #include <string>
+#include "client/shader.h" // IWritableShaderSource
 
 class RenderingEngine;
 class Settings;
@@ -37,7 +39,12 @@ private:
 	void main_menu(MainMenuData *menudata);
 
 	bool skip_main_menu = false;
+	// The player travelled to another dimension: start the world again
+	// right away (without the main menu)
+	bool m_dimension_restart = false;
 	bool random_input = false;
+	// Shader source of the main menu (menu clouds); it must outlive them
+	std::unique_ptr<IWritableShaderSource> ssrc;
 	RenderingEngine *m_rendering_engine = nullptr;
 	InputHandler *input = nullptr;
 	MyEventReceiver *receiver = nullptr;

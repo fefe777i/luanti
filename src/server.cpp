@@ -3,6 +3,7 @@
 // Copyright (C) 2010-2013 celeron55, Perttu Ahola <celeron55@gmail.com>
 
 #include "server.h"
+#include "dimension.h"
 
 #include "activeobject.h"
 #include "chat_interface.h"
@@ -509,10 +510,29 @@ void Server::init()
 	//lock environment
 	EnvAutoLock envlock(this);
 
+	// Every dimension has its own map directory ("overworld" is the world folder)
+	// A server can be bound to one dimension with the "dimension" setting
+	// (every dimension as its own server, see doc/dimensions.md). Otherwise the
+	// world opens in the dimension saved in current_dimension.txt.
+	std::string configured_dimension;
+	if (g_settings->getNoEx("dimension", configured_dimension) &&
+			!configured_dimension.empty()) {
+		if (!dimension::exists(m_path_world, configured_dimension)) {
+			throw ServerError("Dimension \"" + configured_dimension +
+				"\" does not exist. Create it first (/newdimension on the main "
+				"server) and then start this server.");
+		}
+		m_dimension = configured_dimension;
+	} else {
+		m_dimension = dimension::loadCurrent(m_path_world);
+	}
+	const std::string map_path = dimension::getMapPath(m_path_world, m_dimension);
+	infostream << "- dimension: " << m_dimension << " [" << map_path << "]" << std::endl;
+
 	// Create the Map (loads map_meta.txt, overriding configured mapgen params)
 	std::unique_ptr<ServerMap> startup_server_map;
 	try {
-		startup_server_map = std::make_unique<ServerMap>(m_path_world, this,
+		startup_server_map = std::make_unique<ServerMap>(map_path, this,
 				m_emerge.get(), m_metrics_backend.get());
 	} catch (DatabaseException &e) {
 		throw ServerError(std::string(
@@ -4162,6 +4182,73 @@ v3f Server::findSpawnPos()
 
 	// No suitable spawn point found, return fallback 0,0,0
 	return v3f(0.0f, 0.0f, 0.0f);
+}
+
+std::string Server::getDimensionPath() const
+{
+	return dimension::getMapPath(m_path_world, m_dimension);
+}
+
+std::vector<std::string> Server::listDimensions() const
+{
+	return dimension::list(m_path_world);
+}
+
+bool Server::createDimension(const std::string &name,
+		const std::vector<std::pair<std::string, std::string>> &map_settings,
+		std::string &error)
+{
+	return dimension::create(m_path_world, name, map_settings, error);
+}
+
+bool Server::requestDimensionSwitch(const std::string &name, std::string &error)
+{
+	if (!m_simple_singleplayer_mode) {
+		error = "switching dimensions only works in singleplayer";
+		return false;
+	}
+	if (!dimension::exists(m_path_world, name)) {
+		error = "unknown dimension \"" + name + "\"";
+		return false;
+	}
+	if (name == m_dimension) {
+		error = "already in this dimension";
+		return false;
+	}
+	if (m_dimension_switch_requested) {
+		error = "a dimension switch is already in progress";
+		return false;
+	}
+	if (!dimension::saveCurrent(m_path_world, name)) {
+		error = "could not save the dimension state";
+		return false;
+	}
+
+	actionstream << "Switching dimension \"" << m_dimension << "\" -> \""
+		<< name << "\"" << std::endl;
+	// The client notices this, stops the game and starts it again in the new dimension
+	m_dimension_switch_requested = true;
+	return true;
+}
+
+bool Server::transferPlayer(const std::string &name, const std::string &address,
+		u16 port, std::string &error)
+{
+	if (port == 0 || address.size() > 255) {
+		error = "invalid address or port";
+		return false;
+	}
+	RemotePlayer *player = m_env->getPlayer(name.c_str());
+	if (!player || player->getPeerId() == PEER_ID_INEXISTENT) {
+		error = "player is not connected";
+		return false;
+	}
+
+	NetworkPacket pkt(TOCLIENT_TRANSFER, 0, player->getPeerId());
+	pkt << address << port;
+	Send(&pkt);
+	actionstream << "Transferring player " << name << " to port " << port << std::endl;
+	return true;
 }
 
 void Server::requestShutdown(const std::string &msg, bool reconnect, float delay)

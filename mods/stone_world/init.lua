@@ -1,162 +1,112 @@
-local MOD = minetest.get_current_modname()
-local STORAGE = minetest.get_mod_storage()
-local WORLD_NAME = "stone_world"
-local OFFSET = 1000000
-local SPAWN = vector.new(OFFSET, 20, 0)
+-- Кам'яний світ: справжній окремий світ (власна карта), а не зсув координат.
+-- Працює через систему світів рушія (core.create_dimension / core.travel_to_dimension).
+
+local MOD = core.get_current_modname()
+local DIM = "stone_world"
 local ITEM = MOD .. ":teleporter"
-local RETURN_KEY = "return_pos"
-local WORLD_KEY = "world"
 
-local function is_stone_world(pos)
-	return pos.x >= OFFSET - 100000 and pos.x <= OFFSET + 100000
+if not core.create_dimension then
+	core.log("warning", "[" .. MOD .. "] Рушій без підтримки світів, мод вимкнено")
+	return
 end
 
-local function save_return_pos(player)
-	STORAGE:set_string(RETURN_KEY .. ":" .. player:get_player_name(), minetest.pos_to_string(player:get_pos()))
-end
+-- Порожній світ, який заповнюємо каменем у on_generated
+-- (якщо світ уже існує, create_dimension просто поверне false)
+core.create_dimension(DIM, {mg_name = "singlenode"})
 
-local function load_return_pos(player)
-	local value = STORAGE:get_string(RETURN_KEY .. ":" .. player:get_player_name())
-	if value == "" then
-		return nil
+local function stone_content_id()
+	local name = core.registered_aliases["mapgen_stone"]
+	if not name or not core.registered_nodes[name] then
+		name = "default:stone"
+		if not core.registered_nodes[name] then
+			name = "basenodes:stone"
+		end
 	end
-	return minetest.string_to_pos(value)
+	if core.registered_nodes[name] then
+		return core.get_content_id(name)
+	end
 end
 
-local function set_stone_area(minp, maxp)
-	if maxp.x < OFFSET - 100000 or minp.x > OFFSET + 100000 then
+local stone_id
+
+-- Камінь до висоти y = 0, вище - відкрите небо
+core.register_on_generated(function(minp, maxp)
+	if core.get_current_dimension() ~= DIM or minp.y > 0 then
+		return
+	end
+	stone_id = stone_id or stone_content_id()
+	if not stone_id then
 		return
 	end
 
-	local vm = VoxelManip()
-	local emin, emax = vm:read_from_map(minp, maxp)
+	local vm, emin, emax = core.get_mapgen_object("voxelmanip")
 	local area = VoxelArea:new({MinEdge = emin, MaxEdge = emax})
 	local data = vm:get_data()
-	local stone = minetest.get_content_id("default:stone")
-
+	local top = math.min(maxp.y, 0)
 	for z = minp.z, maxp.z do
-		for y = minp.y, maxp.y do
-			for x = minp.x, maxp.x do
-				data[area:index(x, y, z)] = stone
+		for y = minp.y, top do
+			local vi = area:index(minp.x, y, z)
+			for _ = minp.x, maxp.x do
+				data[vi] = stone_id
+				vi = vi + 1
 			end
 		end
 	end
-
 	vm:set_data(data)
+	vm:calc_lighting()
 	vm:write_to_map()
-	vm:update_map()
-end
-
-minetest.register_on_generated(function(minp, maxp)
-	if maxp.x < OFFSET - 100000 or minp.x > OFFSET + 100000 then
-		return
-	end
-	set_stone_area(minp, maxp)
 end)
 
-if minetest.create_subworld then
-	minetest.create_subworld(WORLD_NAME)
-end
-
-local function move_player(player, world_name, pos)
-	local name = player:get_player_name()
-	if minetest.transfer_player then
-		minetest.transfer_player(name, world_name, pos)
-	else
-		player:set_pos(pos)
-	end
-	STORAGE:set_string(WORLD_KEY .. ":" .. name, world_name)
-end
-
-local function enter_stone_world(player)
+local function toggle_world(player)
 	if not player or not player:is_player() then
-		return false
+		return
 	end
-
-	if not is_stone_world(player:get_pos()) then
-		save_return_pos(player)
+	local target = core.get_current_dimension() == DIM and "overworld" or DIM
+	local ok, err = core.travel_to_dimension(player, target)
+	if not ok then
+		core.chat_send_player(player:get_player_name(), tostring(err))
 	end
-
-	move_player(player, WORLD_NAME, vector.add(SPAWN, vector.new(0, 2, 0)))
-
-	minetest.after(0.2, function()
-		if player:is_player() then
-			set_stone_area(
-				vector.new(SPAWN.x - 32, SPAWN.y - 32, SPAWN.z - 32),
-				vector.new(SPAWN.x + 32, SPAWN.y + 32, SPAWN.z + 32)
-			)
-			player:set_pos(vector.add(SPAWN, vector.new(0, 2, 0)))
-		end
-	end)
-	return true
 end
 
-local function leave_stone_world(player)
-	if not player or not player:is_player() then
-		return false
-	end
-
-	local name = player:get_player_name()
-	local pos = load_return_pos(player) or vector.new(0, 20, 0)
-	move_player(player, "overworld", pos)
-	return true
-end
-
-minetest.register_tool(ITEM, {
-	description = "Кам'яний світ",
+core.register_tool(ITEM, {
+	description = "Кам'яний світ (телепорт)",
 	inventory_image = "default_stone.png",
 	stack_max = 1,
 	on_use = function(itemstack, user)
-		enter_stone_world(user)
+		toggle_world(user)
 		return itemstack
 	end,
 	on_place = function(itemstack, user)
-		enter_stone_world(user)
+		toggle_world(user)
 		return itemstack
 	end,
 })
 
-minetest.register_on_joinplayer(function(player)
+core.register_on_joinplayer(function(player)
 	local inv = player:get_inventory()
 	if not inv:contains_item("main", ITEM) then
 		inv:add_item("main", ITEM)
 	end
-
-	local name = player:get_player_name()
-	local world = STORAGE:get_string(WORLD_KEY .. ":" .. name)
-	if world == WORLD_NAME and minetest.get_player_subworld then
-		minetest.after(0.2, function()
-			if player:is_player() then
-				minetest.transfer_player(name, WORLD_NAME, vector.add(SPAWN, vector.new(0, 2, 0)))
-			end
-		end)
-	end
 end)
 
-minetest.register_chatcommand("stoneworld", {
-	params = "",
+core.register_chatcommand("stoneworld", {
 	description = "Телепортуватися у Кам'яний світ",
-	privs = {},
 	func = function(name)
-		local player = minetest.get_player_by_name(name)
-		if not player then
-			return false, "Гравця не знайдено"
+		local ok, err = core.travel_to_dimension(name, DIM)
+		if not ok then
+			return false, tostring(err)
 		end
-		enter_stone_world(player)
-		return true, "Ти у Кам'яному світі"
+		return true, "Переходимо у Кам'яний світ..."
 	end,
 })
 
-minetest.register_chatcommand("overworld", {
-	params = "",
-	description = "Повернутися з Кам'яного світу",
-	privs = {},
+core.register_chatcommand("overworld", {
+	description = "Повернутися зі Кам'яного світу у звичайний",
 	func = function(name)
-		local player = minetest.get_player_by_name(name)
-		if not player then
-			return false, "Гравця не знайдено"
+		local ok, err = core.travel_to_dimension(name, "overworld")
+		if not ok then
+			return false, tostring(err)
 		end
-		leave_stone_world(player)
-		return true, "Ти повернувся у звичайний світ"
+		return true, "Повертаємось у звичайний світ..."
 	end,
 })

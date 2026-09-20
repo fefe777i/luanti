@@ -72,5 +72,13 @@ struct GameErrorData
 
 	// Whether the server has requested a reconnect
 	bool reconnect_requested = false;
+	// Set by the game when the player travelled to another dimension:
+	// the launcher then starts the same world again without the main menu
+	bool dimension_switch_requested = false;
+	// Set by the game when the server asked to continue on another server
+	// of the same host (a dimension that runs as its own server)
+	bool transfer_requested = false;
+	std::string transfer_address;
+	u16 transfer_port = 0;
 	std::string message;
 };

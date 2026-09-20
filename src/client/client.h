@@ -214,6 +214,7 @@ public:
 	void handleCommand_MediaPush(NetworkPacket *pkt);
 	void handleCommand_MinimapModes(NetworkPacket *pkt);
 	void handleCommand_SetLighting(NetworkPacket *pkt);
+	void handleCommand_Transfer(NetworkPacket *pkt);
 	void handleCommand_Camera(NetworkPacket* pkt);
 
 	void ProcessData(NetworkPacket *pkt);
@@ -419,6 +420,15 @@ public:
 	const Address getServerAddress();
 
 	// Hostname of the connected server (but can also be a numerical IP)
+	// The server asked us (TOCLIENT_TRANSFER) to continue on another server
+	bool hasTransferRequest() const { return m_transfer_requested; }
+	bool getTransferRequest(std::string &address, u16 &port) const
+	{
+		address = m_transfer_address;
+		port = m_transfer_port;
+		return m_transfer_requested;
+	}
+
 	const std::string &getAddressName() const
 	{
 		return m_address_name;
@@ -511,6 +521,9 @@ private:
 	std::map<v3s16, WieldMeshSceneNode*> m_ghost_nodes;
 	std::unique_ptr<con::IConnection> m_con;
 	std::string m_address_name;
+	bool m_transfer_requested = false;
+	std::string m_transfer_address;
+	u16 m_transfer_port = 0;
 	ELoginRegister m_allow_login_or_register = ELoginRegister::Any;
 	Camera *m_camera = nullptr;
 	std::unique_ptr<Minimap> m_minimap;

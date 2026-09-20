@@ -1,3 +1,20 @@
 # textdomain: __builtin
 You died=Ви загинули
 Respawn=Відродитися
+Player not found.=Гравця не знайдено.
+You are already in this world.=Ти вже у цьому світі.
+You arrived in the world: @1=Ти потрапив у світ: @1
+List all worlds (dimensions)=Список усіх світів (вимірів)
+Worlds: @1. You are in: @2=Світи: @1. Ти у світі: @2
+<world>=<світ>
+Travel to another world (dimension)=Перейти в інший світ (вимір)
+Could not travel: @1=Не вдалося перейти: @1
+Travelling to the world "@1"...=Перехід у світ "@1"...
+<name> [<mapgen>]=<назва> [<генератор>]
+Create a new world (dimension) with its own terrain=Створити новий світ (вимір) з власним рельєфом
+Usage: /newdimension <name> [<mapgen>]=Використання: /newdimension <назва> [<генератор>]
+Unknown map generator: @1. Use: @2=Невідомий генератор карти: @1. Доступні: @2
+Could not create the world: @1=Не вдалося створити світ: @1
+World "@1" created. Travel there with /dimension @1=Світ "@1" створено. Перейти: /dimension @1
+The world "@1" is not available on this server.=Світ "@1" недоступний на цьому сервері.
+Please reconnect to port @1 to enter the world "@2".=Підключись до порту @1, щоб потрапити у світ "@2".

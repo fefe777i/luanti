@@ -352,6 +352,23 @@ public:
 	inline bool isSingleplayer() const
 			{ return m_simple_singleplayer_mode; }
 
+	// --- Dimensions: separate worlds inside the world folder (see dimension.h) ---
+	const std::string &getCurrentDimension() const { return m_dimension; }
+	// Directory with the map of the current dimension
+	std::string getDimensionPath() const;
+	std::vector<std::string> listDimensions() const;
+	bool createDimension(const std::string &name,
+			const std::vector<std::pair<std::string, std::string>> &map_settings,
+			std::string &error);
+	// Singleplayer only: the game restarts itself in the given dimension.
+	bool requestDimensionSwitch(const std::string &name, std::string &error);
+	inline bool isDimensionSwitchRequested() const
+			{ return m_dimension_switch_requested; }
+	// Multiplayer: asks the client of a player to continue on another server
+	// of the same host ("" = the same address), see TOCLIENT_TRANSFER.
+	bool transferPlayer(const std::string &name, const std::string &address,
+			u16 port, std::string &error);
+
 	struct StepSettings {
 		float steplen;
 		bool pause;
@@ -674,6 +691,9 @@ private:
 	// If true, do not allow multiple players and hide some multiplayer
 	// functionality
 	bool m_simple_singleplayer_mode;
+	// Dimension whose map is loaded (see dimension.h)
+	std::string m_dimension = "overworld";
+	std::atomic<bool> m_dimension_switch_requested{false};
 	u16 m_max_chatmessage_length;
 	// For "dedicated" server list flag
 	bool m_dedicated;

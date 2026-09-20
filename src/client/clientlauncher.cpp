@@ -17,6 +17,7 @@
 #include "gui/guiEngine.h"
 #include "fontengine.h"
 #include "clientlauncher.h"
+#include "dimension.h"
 #include "version.h"
 #include "renderingengine.h"
 #include "settings.h"
@@ -143,7 +144,6 @@ bool ClientLauncher::run(const GameParams &game_params, const Settings &cmd_args
 	// Create the menu clouds
 	// This is only global so it can be used by RenderingEngine::draw_load_screen().
 	assert(!g_menucloudsmgr && !g_menuclouds);
-	std::unique_ptr<IWritableShaderSource> ssrc;
 	try {
 		ssrc.reset(createShaderSource());
 		ssrc->addShaderUniformSetterFactory(std::make_unique<FogShaderUniformSetterFactory>());
@@ -207,13 +207,16 @@ bool ClientLauncher::run(const GameParams &game_params, const Settings &cmd_args
 			guiroot = guienv->addStaticText(L"",
 				core::rect<s32>(0, 0, 10000, 10000));
 
+			const bool is_dimension_restart = m_dimension_restart;
 			bool should_run_game = launch_game(errordata, start_data, cmd_args);
+			m_dimension_restart = false;
 
 			// Reset the reconnect_requested flag
 			errordata.reconnect_requested = false;
 
 			// If skip_main_menu, we only want to startup once
-			if (skip_main_menu && !first_loop)
+			// (except when the game restarts itself for another dimension)
+			if (skip_main_menu && !first_loop && !is_dimension_restart)
 				break;
 			first_loop = false;
 
@@ -235,6 +238,28 @@ bool ClientLauncher::run(const GameParams &game_params, const Settings &cmd_args
 				errordata,
 				chat_backend
 			);
+
+			if (is_dimension_restart && start_data.isSinglePlayer()
+					&& !errordata.message.empty()) {
+				// The new dimension could not be started: go back to the main
+				// world, otherwise the world would fail to start every time
+				dimension::saveCurrent(start_data.world_spec.path,
+						dimension::DEFAULT_NAME);
+			}
+			if (errordata.dimension_switch_requested) {
+				errordata.dimension_switch_requested = false;
+				m_dimension_restart = true;
+			}
+			if (errordata.transfer_requested) {
+				// Continue on another server of the same host, without the main menu
+				errordata.transfer_requested = false;
+				if (!errordata.transfer_address.empty())
+					start_data.address = errordata.transfer_address;
+				start_data.socket_port = errordata.transfer_port;
+				m_dimension_restart = true;
+				// Give the old server a moment to save the player
+				sleep_ms(500);
+			}
 #ifdef NDEBUG
 		} catch (std::exception &e) {
 			errordata.message = "Some exception: " + debug_describe_exc(e);
@@ -258,7 +283,7 @@ bool ClientLauncher::run(const GameParams &game_params, const Settings &cmd_args
 			g_settings->updateConfigFile(g_settings_path.c_str());
 
 		// If no main menu, show error and exit
-		if (skip_main_menu) {
+		if (skip_main_menu && !m_dimension_restart) {
 			if (!errordata.message.empty())
 				retval = false;
 			break;
@@ -423,7 +448,7 @@ bool ClientLauncher::launch_game(GameErrorData &errordata, GameStartData &start_
 	/*
 	 * Show the GUI menu
 	 */
-	if (!skip_main_menu) {
+	if (!skip_main_menu && !m_dimension_restart) {
 		// Initialize menu data
 		MainMenuData menudata(errordata);
 		(GameClientData &)menudata = start_data;

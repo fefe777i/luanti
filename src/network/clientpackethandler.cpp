@@ -1919,3 +1919,26 @@ void Client::handleCommand_SetLighting(NetworkPacket *pkt)
 		*pkt >> lighting.shadow_direction;
 	} while (0);
 }
+
+void Client::handleCommand_Transfer(NetworkPacket *pkt)
+{
+	std::string address;
+	u16 port = 0;
+	*pkt >> address >> port;
+
+	// Only the same host is accepted: the saved password is used to log in there
+	if (!address.empty() && address != m_address_name) {
+		warningstream << "Ignoring transfer request to another host: "
+			<< address << std::endl;
+		return;
+	}
+	if (port == 0) {
+		warningstream << "Ignoring transfer request with invalid port" << std::endl;
+		return;
+	}
+
+	infostream << "Client: server asked to continue on port " << port << std::endl;
+	m_transfer_address = address;
+	m_transfer_port = port;
+	m_transfer_requested = true;
+}

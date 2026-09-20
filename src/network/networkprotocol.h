@@ -710,7 +710,16 @@ enum ToClientCommand : u16
 			u8[len] serialized ParticleParameters
 	*/
 
-	TOCLIENT_NUM_MSG_TYPES = 0x65,
+	TOCLIENT_TRANSFER = 0x65,
+	/*
+		The server asks the client to continue on another server
+		(used when every dimension runs as its own server, see doc/dimensions.md).
+		Older clients ignore this command.
+		std::string address ("" = the same host we are connected to)
+		u16 port
+	*/
+
+	TOCLIENT_NUM_MSG_TYPES = 0x66,
 };
 
 enum ToServerCommand : u16

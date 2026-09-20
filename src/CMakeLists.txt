@@ -444,6 +444,7 @@ set(independent_SRCS
 	convert_json.cpp
 	craftdef.cpp
 	debug.cpp
+	dimension.cpp
 	face_position_cache.cpp
 	gettext_plural_form.cpp
 	httpfetch.cpp
