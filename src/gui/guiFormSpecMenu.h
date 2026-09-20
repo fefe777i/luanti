@@ -21,6 +21,7 @@
 #include "StyleSpec.h"
 #include <ICursorControl.h> // gui::ECURSOR_ICON
 #include <IGUIStaticText.h>
+#include <ISceneManager.h> // scene::ISceneManager (model[] in the main menu)
 
 class InventoryManager;
 class ISimpleTextureSource;

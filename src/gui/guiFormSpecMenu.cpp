@@ -21,6 +21,8 @@
 #include <IGUITabControl.h>
 #include <IGUIImage.h>
 #include <AnimatedMeshSceneNode.h>
+#include <IFileSystem.h>
+#include <IReadFile.h>
 #include "client/renderingengine.h"
 #include "log.h"
 #include "drawItemStack.h"
@@ -2831,9 +2833,17 @@ void GUIFormSpecMenu::parseModel(parserData *data, const std::string &element)
 	// Main menu: no such cache exists yet, load straight from disk -
 	// meshstr is expected to already be an absolute/loadable path in
 	// this case (e.g. built via defaulttexturedir .. "character.b3d").
-	scene::IAnimatedMesh *mesh = m_client ?
-			m_client->getMesh(meshstr) :
-			model_smgr->getMesh(meshstr.c_str());
+	scene::IAnimatedMesh *mesh = nullptr;
+	if (m_client) {
+		mesh = m_client->getMesh(meshstr);
+	} else if (io::IFileSystem *fs = Environment->getFileSystem()) {
+		// Main menu: the scene manager loads meshes from a file object
+		io::IReadFile *file = fs->createAndOpenFile(meshstr.c_str());
+		if (file) {
+			mesh = model_smgr->getMesh(file);
+			file->drop();
+		}
+	}
 
 	if (!mesh) {
 		errorstream << "Invalid model element: Unable to load mesh:"
