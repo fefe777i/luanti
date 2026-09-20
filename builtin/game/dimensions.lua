@@ -234,6 +234,6 @@ core.register_chatcommand("newdimension", {
 		if not ok then
 			return false, S("Could not create the world: @1", err)
 		end
-		return true, S("World \"@1\" created. Travel there with /dimension @1", dim)
+		return true, S("World \"@1\" created. Travel there with /dimension @2", dim, dim)
 	end,
 })
