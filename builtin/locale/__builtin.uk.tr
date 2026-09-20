@@ -16,5 +16,4 @@ Usage: /newdimension <name> [<mapgen>]=Використання: /newdimension <
 Unknown map generator: @1. Use: @2=Невідомий генератор карти: @1. Доступні: @2
 Could not create the world: @1=Не вдалося створити світ: @1
 World "@1" created. Travel there with /dimension @2=Світ "@1" створено. Перейти: /dimension @2
-The world "@1" is not available on this server.=Світ "@1" недоступний на цьому сервері.
 Please reconnect to port @1 to enter the world "@2".=Підключись до порту @1, щоб потрапити у світ "@2".

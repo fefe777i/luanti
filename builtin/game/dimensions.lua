@@ -122,27 +122,29 @@ function core.travel_to_dimension(player, dimension, pos)
 	end
 	meta:set_string(META_ARRIVAL, target and core.pos_to_string(target) or "find")
 
+	-- Servers with one server per dimension send the player to the right server.
+	-- Singleplayer and hosted games ("Host game") restart in the other dimension.
+	local host, port
+	if not core.is_singleplayer() then
+		host, port = get_dimension_server(dimension)
+	end
+
 	local ok, err
-	if core.is_singleplayer() then
-		ok, err = core.switch_dimension(dimension)
-	else
-		local host, port = get_dimension_server(dimension)
-		if not port then
-			ok, err = false, S("The world \"@1\" is not available on this server.", dimension)
-		else
-			local name = player:get_player_name()
-			ok, err = core.transfer_player(name, host, port)
-			if ok then
-				-- Clients that cannot be transferred automatically get the port
-				core.after(5, function()
-					if core.get_player_by_name(name) then
-						core.disconnect_player(name,
-							S("Please reconnect to port @1 to enter the world \"@2\".",
-							port, dimension))
-					end
-				end)
-			end
+	if port then
+		local name = player:get_player_name()
+		ok, err = core.transfer_player(name, host, port)
+		if ok then
+			-- Clients that cannot be transferred automatically get the port
+			core.after(5, function()
+				if core.get_player_by_name(name) then
+					core.disconnect_player(name,
+						S("Please reconnect to port @1 to enter the world \"@2\".",
+						port, dimension))
+				end
+			end)
 		end
+	else
+		ok, err = core.switch_dimension(dimension)
 	end
 	if not ok then
 		meta:set_string(META_ARRIVAL, "")

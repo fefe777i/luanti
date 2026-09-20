@@ -360,7 +360,8 @@ public:
 	bool createDimension(const std::string &name,
 			const std::vector<std::pair<std::string, std::string>> &map_settings,
 			std::string &error);
-	// Singleplayer only: the game restarts itself in the given dimension.
+	// Singleplayer and hosted games (not dedicated servers): the game restarts
+	// itself in the given dimension.
 	bool requestDimensionSwitch(const std::string &name, std::string &error);
 	inline bool isDimensionSwitchRequested() const
 			{ return m_dimension_switch_requested; }

@@ -259,5 +259,4 @@ Usage: /newdimension <name> [<mapgen>]=
 Unknown map generator: @1. Use: @2=
 Could not create the world: @1=
 World "@1" created. Travel there with /dimension @2=
-The world "@1" is not available on this server.=
 Please reconnect to port @1 to enter the world "@2".=

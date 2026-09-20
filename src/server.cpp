@@ -4203,8 +4203,9 @@ bool Server::createDimension(const std::string &name,
 
 bool Server::requestDimensionSwitch(const std::string &name, std::string &error)
 {
-	if (!m_simple_singleplayer_mode) {
-		error = "switching dimensions only works in singleplayer";
+	if (m_dedicated) {
+		error = "a dedicated server cannot restart itself: run one server per "
+			"dimension and set dimension_servers (see doc/dimensions.md)";
 		return false;
 	}
 	if (!dimension::exists(m_path_world, name)) {

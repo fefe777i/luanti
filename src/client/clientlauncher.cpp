@@ -239,7 +239,7 @@ bool ClientLauncher::run(const GameParams &game_params, const Settings &cmd_args
 				chat_backend
 			);
 
-			if (is_dimension_restart && start_data.isSinglePlayer()
+			if (is_dimension_restart && start_data.isAnyServer()
 					&& !errordata.message.empty()) {
 				// The new dimension could not be started: go back to the main
 				// world, otherwise the world would fail to start every time
