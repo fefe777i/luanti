@@ -44,8 +44,10 @@ dofile(menupath .. DIR_DELIM .. "dlg_skin_selector.lua")
 dofile(menupath .. DIR_DELIM .. "dlg_skin_selector.lua")
 
 local tabs = {
+	content  = dofile(menupath .. DIR_DELIM .. "tab_content.lua"),
 	local_game = dofile(menupath .. DIR_DELIM .. "tab_local.lua"),
-	play_online = dofile(menupath .. DIR_DELIM .. "tab_online.lua")
+	play_online = dofile(menupath .. DIR_DELIM .. "tab_online.lua"),
+	servers = dofile(menupath .. DIR_DELIM .. "tab_servers.lua")
 }
 
 local function main_event_handler(tabview, event)
@@ -113,6 +115,8 @@ local function init_globals()
 	tv_main:set_autosave_tab(true)
 	tv_main:add(tabs.local_game)
 	tv_main:add(tabs.play_online)
+	tv_main:add(tabs.servers)
+	tv_main:add(tabs.content)
 
 	tv_main:set_global_event_handler(main_event_handler)
 	tv_main:set_fixed_size(false)
