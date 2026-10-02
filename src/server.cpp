@@ -4184,6 +4184,55 @@ v3f Server::findSpawnPos()
 	return v3f(0.0f, 0.0f, 0.0f);
 }
 
+bool Server::createSubWorld(const std::string &name)
+{
+	if (!dimension::isValidName(name))
+		return false;
+	if (name == dimension::DEFAULT_NAME)
+		return false;
+
+	std::string error;
+	return createDimension(name, {}, error);
+}
+
+void Server::transferPlayer(const std::string &playername,
+		const std::string &subworld_name, v3f pos)
+{
+	PlayerSAO *sao = nullptr;
+	for (session_t peer_id : m_clients.getClientIDs()) {
+		RemoteClient *client = getClient(peer_id);
+		if (client && client->getName() == playername) {
+			sao = getPlayerSAO(peer_id);
+			break;
+		}
+	}
+	if (!sao)
+		return;
+
+	if (subworld_name != "overworld" && !dimension::exists(m_path_world, subworld_name))
+		return;
+
+	auto &state = m_player_subworld_states[playername];
+	state.positions[state.current_subworld] = sao->getBasePosition();
+	state.current_subworld = subworld_name;
+	state.positions[subworld_name] = pos;
+	sao->setBasePosition(pos);
+	SendMovePlayer(sao);
+}
+
+std::string Server::getPlayerSubWorld(const std::string &playername)
+{
+	auto it = m_player_subworld_states.find(playername);
+	if (it == m_player_subworld_states.end())
+		return "overworld";
+	return it->second.current_subworld;
+}
+
+std::vector<std::string> Server::listSubWorlds()
+{
+	return dimension::list(m_path_world);
+}
+
 std::string Server::getDimensionPath() const
 {
 	return dimension::getMapPath(m_path_world, m_dimension);

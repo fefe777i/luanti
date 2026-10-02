@@ -3,5 +3,13 @@
 
 #pragma once
 
-// Obsolete: replaced by the real dimension system, see dimension.h
 #include "dimension.h"
+#include "irr_v3d.h"
+#include <string>
+#include <unordered_map>
+
+// Per-player subworld state used by the custom multiworld logic.
+struct PlayerSubWorldState {
+	std::string current_subworld = "overworld";
+	std::unordered_map<std::string, v3f> positions;
+};

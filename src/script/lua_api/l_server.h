@@ -75,6 +75,8 @@ private:
 	static int l_register_mapgen_script(lua_State *L);
 	// serialize_roundtrip(obj)
 	static int l_serialize_roundtrip(lua_State *L);
+	// create_subworld(name)
+	static int l_create_subworld(lua_State *L);
 	// get_current_dimension()
 	static int l_get_current_dimension(lua_State *L);
 	// get_dimension_path()
@@ -86,7 +88,12 @@ private:
 	// switch_dimension(name) -> true | false, error
 	static int l_switch_dimension(lua_State *L);
 	// transfer_player(name, address, port) -> true | false, error
+	// or transfer_player(name, subworld_name, pos)
 	static int l_transfer_player(lua_State *L);
+	// get_player_subworld(name)
+	static int l_get_player_subworld(lua_State *L);
+	// list_subworlds()
+	static int l_list_subworlds(lua_State *L);
 public:
 	static void Initialize(lua_State *L, int top);
 	static void InitializeAsync(lua_State *L, int top);

@@ -755,9 +755,18 @@ int ModApiServer::l_switch_dimension(lua_State *L)
 }
 
 // transfer_player(name, address, port) -> true | false, error
+// or transfer_player(name, subworld_name, pos) for custom per-player multiworld logic
 int ModApiServer::l_transfer_player(lua_State *L)
 {
 	NO_MAP_LOCK_REQUIRED;
+	if (lua_gettop(L) >= 3 && lua_isstring(L, 2)) {
+		std::string name = luaL_checkstring(L, 1);
+		std::string subworld = luaL_checkstring(L, 2);
+		v3f pos = check_v3f(L, 3);
+		getServer(L)->transferPlayer(name, subworld, pos);
+		return 0;
+	}
+
 	std::string name = luaL_checkstring(L, 1);
 	std::string address = lua_isstring(L, 2) ? lua_tostring(L, 2) : "";
 	lua_Integer port = luaL_checkinteger(L, 3);
@@ -772,6 +781,34 @@ int ModApiServer::l_transfer_player(lua_State *L)
 	lua_pushboolean(L, false);
 	lua_pushstring(L, error.c_str());
 	return 2;
+}
+
+int ModApiServer::l_create_subworld(lua_State *L)
+{
+	NO_MAP_LOCK_REQUIRED;
+	std::string name = luaL_checkstring(L, 1);
+	lua_pushboolean(L, getServer(L)->createSubWorld(name));
+	return 1;
+}
+
+int ModApiServer::l_get_player_subworld(lua_State *L)
+{
+	NO_MAP_LOCK_REQUIRED;
+	std::string pname = luaL_checkstring(L, 1);
+	lua_pushstring(L, getServer(L)->getPlayerSubWorld(pname).c_str());
+	return 1;
+}
+
+int ModApiServer::l_list_subworlds(lua_State *L)
+{
+	NO_MAP_LOCK_REQUIRED;
+	auto list = getServer(L)->listSubWorlds();
+	lua_newtable(L);
+	for (size_t i = 0; i < list.size(); ++i) {
+		lua_pushstring(L, list[i].c_str());
+		lua_rawseti(L, -2, (int)i + 1);
+	}
+	return 1;
 }
 
 void ModApiServer::Initialize(lua_State *L, int top)
@@ -789,7 +826,10 @@ void ModApiServer::Initialize(lua_State *L, int top)
 	API_FCT(list_dimensions);
 	API_FCT(create_dimension);
 	API_FCT(switch_dimension);
+	API_FCT(create_subworld);
 	API_FCT(transfer_player);
+	API_FCT(get_player_subworld);
+	API_FCT(list_subworlds);
 
 	API_FCT(get_current_modname);
 	API_FCT(get_modpath);
