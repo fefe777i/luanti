@@ -4529,6 +4529,70 @@ bool Server::migrateModStorageDatabase(const GameParams &game_params, const Sett
 	return succeeded;
 }
 
+bool Server::createSubWorld(const std::string &name)
+{
+	if (name.empty() || name == "." || name == ".." || name == "overworld" ||
+		name.find('/') != std::string::npos || name.find('\\') != std::string::npos)
+		return false;
+
+	const std::string path = m_path_world + DIR_DELIM + name;
+	if (isSubWorldDir(path))
+		return true;
+	if (fs::PathExists(path))
+		return false;
+	if (!fs::CreateDir(path))
+		return false;
+
+	const std::string worldmt = path + DIR_DELIM + "world.mt";
+	return fs::safeWriteToFile(worldmt, "gameid = minetest\n");
+}
+
+void Server::transferPlayer(const std::string &playername,
+		const std::string &subworld_name, v3f pos)
+{
+	PlayerSAO *sao = nullptr;
+	for (session_t peer_id : m_clients.getClientIDs()) {
+		RemoteClient *client = getClient(peer_id);
+		if (client && client->getName() == playername) {
+			sao = getPlayerSAO(peer_id);
+			break;
+		}
+	}
+	if (!sao)
+		return;
+
+	if (subworld_name != "overworld" &&
+		!isSubWorldDir(m_path_world + DIR_DELIM + subworld_name))
+		return;
+
+	auto &state = m_player_subworld_states[playername];
+	state.positions[state.current_subworld] = sao->getBasePosition();
+	state.current_subworld = subworld_name;
+	state.positions[subworld_name] = pos;
+	sao->setBasePosition(pos);
+	SendMovePlayer(sao);
+}
+
+std::string Server::getPlayerSubWorld(const std::string &playername)
+{
+	auto it = m_player_subworld_states.find(playername);
+	if (it == m_player_subworld_states.end())
+		return "overworld";
+	return it->second.current_subworld;
+}
+
+std::vector<std::string> Server::listSubWorlds()
+{
+	std::vector<std::string> result{"overworld"};
+	for (const auto &node : fs::GetDirListing(m_path_world)) {
+		if (!node.dir || node.name.empty() || node.name[0] == '.' || node.name == "overworld")
+			continue;
+		if (isSubWorldDir(m_path_world + DIR_DELIM + node.name))
+			result.push_back(node.name);
+	}
+	return result;
+}
+
 u16 Server::getProtocolVersionMin()
 {
 	u16 min_proto = g_settings->getU16("protocol_version_min");
