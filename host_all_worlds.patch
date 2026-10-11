@@ -737,6 +737,21 @@ index 4ae4d8e..22d022a 100644
  };
  
  /// Data provided to Lua for error reporting by the main menu
+diff --git a/src/script/lua_api/l_server.cpp b/src/script/lua_api/l_server.cpp
+index eaa15df..841fbb7 100644
+--- a/src/script/lua_api/l_server.cpp
++++ b/src/script/lua_api/l_server.cpp
+@@ -759,7 +759,9 @@ int ModApiServer::l_switch_dimension(lua_State *L)
+ int ModApiServer::l_transfer_player(lua_State *L)
+ {
+ 	NO_MAP_LOCK_REQUIRED;
+-	if (lua_gettop(L) >= 3 && lua_isstring(L, 2)) {
++	// (name, subworld, pos): the third argument is a position table.
++	// (name, address, port): the third argument is a number.
++	if (lua_gettop(L) >= 3 && lua_isstring(L, 2) && lua_istable(L, 3)) {
+ 		std::string name = luaL_checkstring(L, 1);
+ 		std::string subworld = luaL_checkstring(L, 2);
+ 		v3f pos = check_v3f(L, 3);
 diff --git a/src/server.cpp b/src/server.cpp
 index c26acca..96e5abf 100644
 --- a/src/server.cpp
