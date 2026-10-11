@@ -1,0 +1,924 @@
+diff --git a/builtin/game/dimensions.lua b/builtin/game/dimensions.lua
+index 2e3f351..8dccdb1 100644
+--- a/builtin/game/dimensions.lua
++++ b/builtin/game/dimensions.lua
+@@ -25,6 +25,7 @@ local S = core.get_translator("__builtin")
+ 
+ local META_POS = "dimension_pos:"          -- last position in a dimension
+ local META_ARRIVAL = "dimension_arrival"   -- where to appear after the restart
++local META_CURRENT = "dimension_current"   -- dimension the player was last in
+ 
+ local MAPGENS = {
+ 	v5 = true, v6 = true, v7 = true, valleys = true,
+@@ -158,6 +159,33 @@ end
+ core.register_on_joinplayer(function(player)
+ 	local meta = player:get_meta()
+ 	local arrival = meta:get_string(META_ARRIVAL)
++	local here = core.get_current_dimension()
++
++	-- Every dimension is its own server: a player who left the game in
++	-- another dimension continues there (their saved position belongs to
++	-- that dimension's map).
++	local last = meta:get_string(META_CURRENT)
++	if arrival == "" and last ~= "" and last ~= here and not core.is_singleplayer() then
++		local host, port = get_dimension_server(last)
++		if port then
++			local name = player:get_player_name()
++			core.after(0, function()
++				if core.get_player_by_name(name) then
++					core.transfer_player(name, host, port)
++				end
++			end)
++			core.after(5, function()
++				if core.get_player_by_name(name) then
++					core.disconnect_player(name,
++						S("Please reconnect to port @1 to enter the world \"@2\".",
++						port, last))
++				end
++			end)
++			return
++		end
++	end
++	meta:set_string(META_CURRENT, here)
++
+ 	if arrival == "" then
+ 		return
+ 	end
+diff --git a/doc/dimensions.md b/doc/dimensions.md
+index 4af7154..1dbaa2f 100644
+--- a/doc/dimensions.md
++++ b/doc/dimensions.md
+@@ -27,10 +27,26 @@
+ пішов гравець, запам'ятовується, тож при поверненні гравець з'являється там само.
+ Якщо світ ще не відвідували, гравець з'являється на поверхні біля `x=8, z=8`.
+ 
+-Так працює одиночна гра і режим "Хостити гру" (кнопка "Зробити сервер" у меню).
+-У "Хостити гру" переходить увесь світ разом: інші гравці відключаться і можуть зайти
+-знову за тією ж адресою, вже в новий світ. Для окремого світу кожному гравцю дивись
+-розділ "Сервер" нижче.
++Так працює одиночна гра: перехід перезапускає гру в іншому світі.
++
++## Хостити гру (кнопка "Зробити сервер")
++
++Кнопка запускає **окремий сервер для кожного світу** в одному процесі: Верхній світ
++працює на порту з меню, кожен наступний світ на наступному вільному порту. Усі сервери
++відкривають одну теку світу, тому гравці, інвентар і привілеї спільні, а карти окремі.
++Різні гравці можуть бути в різних світах одночасно, а коли хост (або будь-хто) переходить
++в інший світ, сервери інших світів не зупиняються.
++
++- Налаштування `dimension_servers` заповнюється автоматично (`overworld=30000, nether=30001`).
++- Світи, створені під час гри (`/newdimension` або мод), отримують свій сервер самі.
++  Якщо сервер світу ще стартує, перехід дасть повідомлення спробувати за кілька секунд.
++- Гравець, який вийшов з гри в іншому світі, при вході на головний порт автоматично
++  потрапляє туди, де був.
++- Усі UDP-порти треба відкрити для інших гравців. Автоматичний перехід між портами
++  працює в клієнті цього форку; звичайний клієнт отримає повідомлення, до якого порту
++  підключитися.
++- Кожен світ завантажує всі моди, тому пам'яті потрібно приблизно у кількість світів разів більше.
++- Сервери зупиняються, коли хост виходить у головне меню.
+ 
+ ## Сервер
+ 
+diff --git a/src/client/CMakeLists.txt b/src/client/CMakeLists.txt
+index 2f68883..93859a3 100644
+--- a/src/client/CMakeLists.txt
++++ b/src/client/CMakeLists.txt
+@@ -49,6 +49,7 @@ set(client_SRCS
+ 	${CMAKE_CURRENT_SOURCE_DIR}/content_cao.cpp
+ 	${CMAKE_CURRENT_SOURCE_DIR}/content_cso.cpp
+ 	${CMAKE_CURRENT_SOURCE_DIR}/content_mapblock.cpp
++	${CMAKE_CURRENT_SOURCE_DIR}/dimensionhost.cpp
+ 	${CMAKE_CURRENT_SOURCE_DIR}/filecache.cpp
+ 	${CMAKE_CURRENT_SOURCE_DIR}/fontengine.cpp
+ 	${CMAKE_CURRENT_SOURCE_DIR}/game.cpp
+diff --git a/src/client/clientlauncher.cpp b/src/client/clientlauncher.cpp
+index b6a9800..4814414 100644
+--- a/src/client/clientlauncher.cpp
++++ b/src/client/clientlauncher.cpp
+@@ -18,6 +18,7 @@
+ #include "fontengine.h"
+ #include "clientlauncher.h"
+ #include "dimension.h"
++#include "dimensionhost.h"
+ #include "version.h"
+ #include "renderingengine.h"
+ #include "settings.h"
+@@ -267,6 +268,10 @@ bool ClientLauncher::run(const GameParams &game_params, const Settings &cmd_args
+ 		}
+ #endif
+ 
++		// The host left the world (not just moved to another dimension)
++		if (m_dim_host && !m_dimension_restart)
++			m_dim_host.reset();
++
+ 		m_rendering_engine->get_scene_manager()->clear();
+ 
+ 		delete g_touchcontrols;
+@@ -290,6 +295,8 @@ bool ClientLauncher::run(const GameParams &game_params, const Settings &cmd_args
+ 		}
+ 	} // Menu-game loop
+ 
++	m_dim_host.reset();
++
+ 	// If profiler was enabled print it one last time
+ 	if (g_settings->getFloat("profiler_print_interval") > 0) {
+ 		infostream << "Profiler:" << std::endl;
+@@ -540,6 +547,49 @@ bool ClientLauncher::launch_game(GameErrorData &errordata, GameStartData &start_
+ 		}
+ 	}
+ 
++	// Servers run by the launcher only exist while hosting a world
++	start_data.servers_hosted_by_launcher = false;
++	start_data.external_servers_start = nullptr;
++	start_data.external_servers_stop = nullptr;
++	start_data.external_servers_step = nullptr;
++	start_data.external_servers_shutdown_requested = nullptr;
++
++	if (start_data.mode == GameClientData::GM_HOST_AND_JOIN) {
++		// "Host game": one server per dimension, so that different players
++		// can be in different dimensions at the same time. The host's own
++		// client joins the main dimension like every other player.
++		start_data.servers_hosted_by_launcher = true;
++		if (start_data.address.empty())
++			start_data.address = "127.0.0.1";
++
++		if (!m_dim_host) {
++			start_data.external_servers_start = [this, &start_data](std::string &error) {
++				auto host = std::make_unique<DimensionHost>(
++						start_data.world_spec.path, start_data.game_spec,
++						start_data.socket_port);
++				if (!host->start(error))
++					return false;
++				m_dim_host = std::move(host);
++				return true;
++			};
++		}
++		start_data.external_servers_stop = [this](std::string &message) {
++			if (!m_dim_host)
++				return;
++			const std::string shutdown_message = m_dim_host->getShutdownMessage();
++			m_dim_host.reset();
++			if (message.empty())
++				message = shutdown_message;
++		};
++		start_data.external_servers_step = [this]() {
++			if (m_dim_host)
++				m_dim_host->step();
++		};
++		start_data.external_servers_shutdown_requested = [this]() {
++			return m_dim_host && m_dim_host->isShutdownRequested();
++		};
++	}
++
+ 	return true;
+ }
+ 
+diff --git a/src/client/clientlauncher.h b/src/client/clientlauncher.h
+index d5d086c..d948270 100644
+--- a/src/client/clientlauncher.h
++++ b/src/client/clientlauncher.h
+@@ -4,6 +4,7 @@
+ 
+ #pragma once
+ 
++#include "dimensionhost.h"
+ #include <memory>
+ #include <string>
+ #include "client/shader.h" // IWritableShaderSource
+@@ -42,6 +43,10 @@ class ClientLauncher
+ 	// The player travelled to another dimension: start the world again
+ 	// right away (without the main menu)
+ 	bool m_dimension_restart = false;
++	// Servers of a hosted world: one per dimension (see dimensionhost.h).
++	// They run for as long as the host stays in the world, even while the
++	// host's client moves between dimensions.
++	std::unique_ptr<DimensionHost> m_dim_host;
+ 	bool random_input = false;
+ 	// Shader source of the main menu (menu clouds); it must outlive them
+ 	std::unique_ptr<IWritableShaderSource> ssrc;
+diff --git a/src/client/dimensionhost.cpp b/src/client/dimensionhost.cpp
+new file mode 100644
+index 0000000..4a4d19c
+--- /dev/null
++++ b/src/client/dimensionhost.cpp
+@@ -0,0 +1,268 @@
++// Luanti
++// SPDX-License-Identifier: LGPL-2.1-or-later
++
++#include "dimensionhost.h"
++#include "clientmedia.h"
++#include "dimension.h"
++#include "exceptions.h"
++#include "log.h"
++#include "network/address.h"
++#include "network/networkexceptions.h"
++#include "network/socket.h"
++#include "server.h"
++#include "settings.h"
++#include "util/string.h"
++
++namespace {
++
++Address makeBindAddress(u16 port)
++{
++	Address addr(0, 0, 0, 0, port);
++	if (g_settings->getBool("ipv6_server"))
++		addr.setAddress(static_cast<IPv6AddressBytes *>(nullptr));
++	const std::string bind_str = g_settings->get("bind_address");
++	try {
++		addr.Resolve(bind_str.c_str());
++	} catch (const ResolveError &e) {
++		warningstream << "Resolving bind address \"" << bind_str
++			<< "\" failed: " << e.what()
++			<< " -- Listening on all addresses." << std::endl;
++	}
++	return addr;
++}
++
++bool isPortFree(u16 port)
++{
++	try {
++		Address addr = makeBindAddress(port);
++		UDPSocket socket(addr.isIPv6());
++		socket.Bind(addr);
++		return true;
++	} catch (const std::exception &) {
++		return false;
++	}
++}
++
++}
++
++DimensionHost::DimensionHost(const std::string &world_path,
++		const SubgameSpec &gamespec, u16 base_port) :
++	m_world_path(world_path),
++	m_gamespec(gamespec),
++	m_base_port(base_port),
++	m_next_port(base_port + 1)
++{
++}
++
++DimensionHost::~DimensionHost()
++{
++	stop();
++}
++
++u16 DimensionHost::getPort(const std::string &dimension) const
++{
++	std::lock_guard<std::mutex> lock(m_mutex);
++	auto it = m_ports.find(dimension);
++	return it == m_ports.end() ? 0 : it->second;
++}
++
++u16 DimensionHost::allocatePort()
++{
++	// m_mutex is not held here (only called by the starting thread)
++	for (int i = 0; i < 200; i++) {
++		u16 port = m_next_port++;
++		if (m_next_port == 0)
++			m_next_port = 1024;
++		bool used = false;
++		{
++			std::lock_guard<std::mutex> lock(m_mutex);
++			for (const auto &it : m_ports)
++				used |= (it.second == port);
++		}
++		if (!used && isPortFree(port))
++			return port;
++	}
++	return 0;
++}
++
++void DimensionHost::publishSetting()
++{
++	// "dimension_servers = overworld=30000, nether=30001" (read by
++	// core.travel_to_dimension)
++	std::string value;
++	{
++		std::lock_guard<std::mutex> lock(m_mutex);
++		for (const auto &it : m_ports) {
++			if (!value.empty())
++				value += ", ";
++			value += it.first + "=" + std::to_string(it.second);
++		}
++	}
++	g_settings->set("dimension_servers", value);
++}
++
++bool DimensionHost::startServer(const std::string &dimension, std::string &error)
++{
++	const bool is_main = (dimension == dimension::DEFAULT_NAME);
++	u16 port = is_main ? m_base_port : allocatePort();
++	if (port == 0) {
++		error = "no free port for the dimension \"" + dimension + "\"";
++		return false;
++	}
++
++	std::unique_ptr<Server> server;
++	try {
++		server = std::make_unique<Server>(m_world_path, m_gamespec, false,
++				makeBindAddress(port), false, nullptr, &m_shutdown_message,
++				dimension);
++		// Only one server announces the world to the server list
++		server->setMasterAnnounce(is_main);
++		server->setDimensionCreatedCallback(
++				[this](const std::string &name) { queueDimension(name); });
++		server->setStepSettings(Server::StepSettings{1.0f / 60.0f, false});
++		server->start();
++	} catch (const std::exception &e) {
++		error = std::string("dimension \"") + dimension + "\": " + e.what();
++		errorstream << "DimensionHost: " << error << std::endl;
++		return false;
++	}
++
++	if (is_main)
++		copyMediaToClientCache(server.get());
++
++	{
++		std::lock_guard<std::mutex> lock(m_mutex);
++		m_ports[dimension] = port;
++		m_servers[dimension] = std::move(server);
++	}
++	publishSetting();
++	actionstream << "DimensionHost: dimension \"" << dimension
++		<< "\" listens on port " << port << std::endl;
++	return true;
++}
++
++void DimensionHost::copyMediaToClientCache(Server *server)
++{
++	// Lets the host's own client skip downloading media it can read from disk
++	u32 n = 0;
++	for (auto &it : server->getMediaList()) {
++		if (it.first.size() == 20 && clientMediaUpdateCacheCopy(it.first, it.second))
++			n++;
++	}
++	infostream << "Copied " << n << " files directly from server to client cache"
++		<< std::endl;
++}
++
++void DimensionHost::queueDimension(const std::string &dimension)
++{
++	// May be called from a server thread: only queue, the worker starts it
++	std::lock_guard<std::mutex> lock(m_mutex);
++	if (m_stopping || !m_started || m_known.count(dimension))
++		return;
++	m_known.insert(dimension);
++	m_queue.push_back(dimension);
++	m_cond.notify_one();
++}
++
++bool DimensionHost::start(std::string &error)
++{
++	{
++		std::lock_guard<std::mutex> lock(m_mutex);
++		m_known.insert(dimension::DEFAULT_NAME);
++	}
++
++	m_had_old_setting = g_settings->getNoEx("dimension_servers", m_old_setting);
++	m_setting_saved = true;
++
++	if (!startServer(dimension::DEFAULT_NAME, error)) {
++		stop();
++		return false;
++	}
++
++	{
++		std::lock_guard<std::mutex> lock(m_mutex);
++		m_started = true;
++	}
++	// Dimensions that already exist, or were created by mods while the main
++	// one was loading
++	for (const std::string &name : dimension::list(m_world_path))
++		queueDimension(name);
++
++	m_worker = std::thread([this] { workerMain(); });
++	return true;
++}
++
++void DimensionHost::workerMain()
++{
++	while (true) {
++		std::string dimension;
++		{
++			std::unique_lock<std::mutex> lock(m_mutex);
++			m_cond.wait(lock, [this] { return m_stopping || !m_queue.empty(); });
++			if (m_stopping)
++				return;
++			dimension = m_queue.front();
++			m_queue.pop_front();
++		}
++		std::string error;
++		if (!startServer(dimension, error))
++			errorstream << "DimensionHost: could not start " << error << std::endl;
++	}
++}
++
++void DimensionHost::step()
++{
++	std::vector<Server *> servers;
++	{
++		std::lock_guard<std::mutex> lock(m_mutex);
++		for (auto &it : m_servers)
++			servers.push_back(it.second.get());
++	}
++	for (Server *server : servers)
++		server->step();
++}
++
++bool DimensionHost::isShutdownRequested() const
++{
++	std::lock_guard<std::mutex> lock(m_mutex);
++	for (const auto &it : m_servers) {
++		if (it.second->isShutdownRequested())
++			return true;
++	}
++	return false;
++}
++
++void DimensionHost::stop()
++{
++	{
++		std::lock_guard<std::mutex> lock(m_mutex);
++		m_stopping = true;
++		m_cond.notify_all();
++	}
++	if (m_worker.joinable())
++		m_worker.join();
++
++	std::map<std::string, std::unique_ptr<Server>> servers;
++	{
++		std::lock_guard<std::mutex> lock(m_mutex);
++		servers.swap(m_servers);
++		m_ports.clear();
++	}
++
++	// Stop the other dimensions first, the main one last
++	for (auto it = servers.begin(); it != servers.end();) {
++		if (it->first != dimension::DEFAULT_NAME)
++			it = servers.erase(it);
++		else
++			++it;
++	}
++	servers.clear();
++
++	if (g_settings && m_setting_saved) {
++		if (m_had_old_setting)
++			g_settings->set("dimension_servers", m_old_setting);
++		else
++			g_settings->remove("dimension_servers");
++	}
++	m_setting_saved = false;
++}
+diff --git a/src/client/dimensionhost.h b/src/client/dimensionhost.h
+new file mode 100644
+index 0000000..4b4d56d
+--- /dev/null
++++ b/src/client/dimensionhost.h
+@@ -0,0 +1,86 @@
++// Luanti
++// SPDX-License-Identifier: LGPL-2.1-or-later
++
++#pragma once
++
++#include "irrlichttypes.h"
++#include "content/subgames.h"
++#include <condition_variable>
++#include <deque>
++#include <map>
++#include <memory>
++#include <mutex>
++#include <set>
++#include <string>
++#include <thread>
++
++class Server;
++
++/*
++	Runs one server per dimension of a hosted world ("Host game" button).
++
++	All servers live in this process, open the same world folder (players,
++	inventories and privileges are shared) and each one loads the map of its
++	own dimension, so different players can be in different dimensions at the
++	same time. The main dimension ("overworld") listens on the port chosen in
++	the menu, every other dimension on the next free port after it. The
++	"dimension_servers" setting is kept up to date, so core.travel_to_dimension()
++	sends players to the right server. Dimensions created while the game is
++	running (/newdimension, mods) get their server automatically.
++
++	The host's own client connects like any other client, so the servers
++	outlive game restarts and the host can move between dimensions without
++	stopping anybody else's server.
++*/
++class DimensionHost
++{
++public:
++	DimensionHost(const std::string &world_path, const SubgameSpec &gamespec,
++			u16 base_port);
++	~DimensionHost();
++
++	// Starts the main dimension and then the others in the background.
++	// Returns false (and sets `error`) when the main dimension failed to start.
++	bool start(std::string &error);
++	// Stops all servers (blocks until the worlds are saved)
++	void stop();
++
++	u16 getMainPort() const { return m_base_port; }
++	// 0 when the dimension has no (running) server
++	u16 getPort(const std::string &dimension) const;
++
++	// Called every frame by the game: rethrows fatal server errors
++	void step();
++	bool isShutdownRequested() const;
++
++	// Message of the servers' shutdown errors (empty if none)
++	const std::string &getShutdownMessage() const { return m_shutdown_message; }
++
++private:
++	bool startServer(const std::string &dimension, std::string &error);
++	void queueDimension(const std::string &dimension);
++	void workerMain();
++	u16 allocatePort();
++	void publishSetting();
++	void copyMediaToClientCache(Server *server);
++
++	std::string m_world_path;
++	SubgameSpec m_gamespec;
++	u16 m_base_port;
++	u16 m_next_port;
++
++	mutable std::mutex m_mutex;
++	std::map<std::string, std::unique_ptr<Server>> m_servers;
++	std::map<std::string, u16> m_ports;
++	std::set<std::string> m_known; // started or queued
++	std::deque<std::string> m_queue;
++	std::condition_variable m_cond;
++	std::thread m_worker;
++	bool m_stopping = false;
++	bool m_started = false;
++
++	bool m_setting_saved = false;
++	bool m_had_old_setting = false;
++	std::string m_old_setting;
++	std::string m_shutdown_message;
++};
+diff --git a/src/client/game.cpp b/src/client/game.cpp
+index 52bbd00..9743731 100644
+--- a/src/client/game.cpp
++++ b/src/client/game.cpp
+@@ -434,6 +434,12 @@ bool Game::startup(volatile std::sig_atomic_t *kill,
+ 	this->input               = input;
+ 	this->chat_backend        = chat_backend;
+ 	simple_singleplayer_mode  = start_data.isSinglePlayer();
++	m_servers_hosted_by_launcher = start_data.servers_hosted_by_launcher;
++	m_external_servers_start = start_data.external_servers_start;
++	m_external_servers_stop = start_data.external_servers_stop;
++	m_external_servers_step = start_data.external_servers_step;
++	m_external_servers_shutdown_requested =
++			start_data.external_servers_shutdown_requested;
+ 
+ 	input->reloadKeybindings();
+ 
+@@ -512,6 +518,8 @@ void Game::run()
+ 			&& !(*kill || g_gamecallback->shutdown_requested
+ 			|| (server && (server->isShutdownRequested()
+ 				|| server->isDimensionSwitchRequested()))
++			|| (m_external_servers_shutdown_requested
++				&& m_external_servers_shutdown_requested())
+ 			|| (client && client->hasTransferRequest()))) {
+ 
+ 		framemarker.end();
+@@ -670,6 +678,10 @@ void Game::shutdown()
+ 	auto stop_thread = runInThread([=] {
+ 		delete server;
+ 		server = nullptr;
++		// Servers of a hosted world keep running while the host's client only
++		// moves to another dimension
++		if (m_external_servers_stop && !errordata->transfer_requested)
++			m_external_servers_stop(errordata->message);
+ 	}, "ServerStop");
+ 
+ 	FpsControl fps_control;
+@@ -725,6 +737,9 @@ bool Game::init(
+ 	if (address.empty()) {
+ 		if (!createServer(map_dir, gamespec, port))
+ 			return false;
++	} else if (m_external_servers_start) {
++		if (!startExternalServers())
++			return false;
+ 	}
+ 
+ 	return true;
+@@ -755,6 +770,43 @@ bool Game::initSound()
+ 	return true;
+ }
+ 
++bool Game::startExternalServers()
++{
++	showOverlayMessage(N_("Creating server..."), 0, 5);
++
++	std::string error;
++	bool started = false;
++	auto start_thread = runInThread([&] {
++		started = m_external_servers_start(error);
++	}, "ServerStart");
++
++	input->clear();
++	bool success = true;
++
++	FpsControl fps_control;
++	fps_control.reset();
++
++	while (start_thread->isRunning()) {
++		if (!m_rendering_engine->run() || input->cancelPressed())
++			success = false;
++		f32 dtime;
++		fps_control.limit(device, &dtime);
++
++		if (success)
++			showOverlayMessage(N_("Creating server..."), dtime, 5);
++		else
++			showOverlayMessage(N_("Shutting down..."), dtime, 0, &m_shutdown_progress);
++	}
++
++	start_thread->rethrow();
++
++	if (!started) {
++		errordata->setError(error);
++		return false;
++	}
++	return success;
++}
++
+ bool Game::createServer(const std::string &map_dir,
+ 		const SubgameSpec &gamespec, u16 port)
+ {
+@@ -1040,7 +1092,7 @@ bool Game::connectToServer(const GameStartData &start_data,
+ 
+ 	client->migrateModStorage();
+ 	client->m_simple_singleplayer_mode = simple_singleplayer_mode;
+-	client->m_internal_server = !!server;
++	client->m_internal_server = !!server || m_servers_hosted_by_launcher;
+ 
+ 	/*
+ 		Wait for server to accept connection
+@@ -2144,6 +2196,9 @@ inline void Game::step(f32 dtime)
+ 		server->step();
+ 	}
+ 
++	if (m_external_servers_step)
++		m_external_servers_step();
++
+ 	if (!m_is_paused)
+ 		client->step(dtime);
+ }
+diff --git a/src/client/game_internal.h b/src/client/game_internal.h
+index 21efc02..f3068c7 100644
+--- a/src/client/game_internal.h
++++ b/src/client/game_internal.h
+@@ -4,6 +4,8 @@
+ 
+ #pragma once
+ 
++#include <functional>
++
+ #include "game.h"
+ 
+ #include <AnimatedMeshSceneNode.h>
+@@ -128,6 +130,7 @@ class Game {
+ 	bool init(const std::string &map_dir, const std::string &address,
+ 			u16 port, const SubgameSpec &gamespec);
+ 	bool initSound();
++	bool startExternalServers();
+ 	bool createServer(const std::string &map_dir,
+ 			const SubgameSpec &gamespec, u16 port);
+ 	void copyServerClientCache();
+@@ -306,6 +309,12 @@ class Game {
+ 
+ 	Client *client = nullptr;
+ 	Server *server = nullptr;
++	// Servers run by the launcher (one per dimension of a hosted world)
++	bool m_servers_hosted_by_launcher = false;
++	std::function<bool(std::string &)> m_external_servers_start;
++	std::function<void(std::string &)> m_external_servers_stop;
++	std::function<void()> m_external_servers_step;
++	std::function<bool()> m_external_servers_shutdown_requested;
+ 
+ 	ClientDynamicInfo client_display_info{};
+ 	float dynamic_info_send_timer = 0;
+diff --git a/src/gameparams.h b/src/gameparams.h
+index 4ae4d8e..22d022a 100644
+--- a/src/gameparams.h
++++ b/src/gameparams.h
+@@ -7,6 +7,7 @@
+ #include "irrlichttypes.h"
+ #include "content/subgames.h"
+ #include "log.h" // errorstream
++#include <functional>
+ 
+ // Information provided from "main"
+ // Start information for server or client
+@@ -54,6 +55,18 @@ struct GameStartData : GameParams, GameClientData
+ 
+ 	// "world_path" must be kept in sync!
+ 	WorldSpec world_spec;
++
++	// Set when the servers are run by the launcher (one per dimension of a
++	// hosted world, see client/dimensionhost.h) instead of by the game.
++	// The game then only connects to them as a client.
++	bool servers_hosted_by_launcher = false;
++	// Starts the servers (blocking; the game shows "Creating server...")
++	std::function<bool(std::string &error)> external_servers_start;
++	// Stops them when the game is left for good (not when moving to another
++	// server of the same host); may append to the message shown in the menu
++	std::function<void(std::string &message)> external_servers_stop;
++	std::function<void()> external_servers_step;
++	std::function<bool()> external_servers_shutdown_requested;
+ };
+ 
+ /// Data provided to Lua for error reporting by the main menu
+diff --git a/src/server.cpp b/src/server.cpp
+index c26acca..80c7120 100644
+--- a/src/server.cpp
++++ b/src/server.cpp
+@@ -4,6 +4,8 @@
+ 
+ #include "server.h"
+ #include "dimension.h"
++#include "threading/mutex_auto_lock.h"
++#include <mutex>
+ 
+ #include "activeobject.h"
+ #include "chat_interface.h"
+@@ -282,6 +284,35 @@ static void enrich_exception(BaseException &e, const NetworkPacket &pkt, bool in
+ 	Server
+ */
+ 
++namespace {
++// The game settings layer is process-global, but several servers (one per
++// dimension) can run in one process: they share one layer, which is freed
++// together with the last server.
++std::mutex g_game_settings_mutex;
++int g_game_settings_refs = 0;
++
++Settings *acquireGameSettingsLayer()
++{
++	MutexAutoLock lock(g_game_settings_mutex);
++	Settings *layer = Settings::getLayer(SL_GAME);
++	if (!layer)
++		layer = Settings::createLayer(SL_GAME);
++	g_game_settings_refs++;
++	return layer;
++}
++
++void releaseGameSettingsLayer(Settings *layer)
++{
++	if (!layer)
++		return;
++	MutexAutoLock lock(g_game_settings_mutex);
++	if (--g_game_settings_refs <= 0) {
++		g_game_settings_refs = 0;
++		delete layer;
++	}
++}
++}
++
+ Server::Server(
+ 		const std::string &path_world,
+ 		const SubgameSpec &gamespec,
+@@ -289,7 +320,8 @@ Server::Server(
+ 		Address bind_addr,
+ 		bool dedicated,
+ 		ChatInterface *iface,
+-		std::string *shutdown_errmsg
++		std::string *shutdown_errmsg,
++		const std::string &bound_dimension
+ 	):
+ 	m_bind_addr(bind_addr),
+ 	m_path_world(path_world),
+@@ -306,6 +338,8 @@ Server::Server(
+ 	m_shutdown_errmsg(shutdown_errmsg),
+ 	m_modchannel_mgr(new ModChannelMgr())
+ {
++	m_bound_dimension = bound_dimension;
++
+ 	if (m_path_world.empty())
+ 		throw ServerError("Supplied empty world path");
+ 
+@@ -452,7 +486,8 @@ Server::~Server()
+ 	}
+ 
+ 	// Delete the rest in the reverse order of creation
+-	delete m_game_settings;
++	releaseGameSettingsLayer(m_game_settings);
++	m_game_settings = nullptr;
+ 	delete m_banmanager;
+ 	delete m_mod_storage_database;
+ 	delete m_rollback;
+@@ -477,7 +512,7 @@ void Server::init()
+ 	infostream << "- world:  " << m_path_world << std::endl;
+ 	infostream << "- game:   " << m_gamespec.path << std::endl;
+ 
+-	m_game_settings = Settings::createLayer(SL_GAME);
++	m_game_settings = acquireGameSettingsLayer();
+ 
+ 	// Create world if it doesn't exist
+ 	try {
+@@ -514,9 +549,10 @@ void Server::init()
+ 	// A server can be bound to one dimension with the "dimension" setting
+ 	// (every dimension as its own server, see doc/dimensions.md). Otherwise the
+ 	// world opens in the dimension saved in current_dimension.txt.
+-	std::string configured_dimension;
+-	if (g_settings->getNoEx("dimension", configured_dimension) &&
+-			!configured_dimension.empty()) {
++	std::string configured_dimension = m_bound_dimension;
++	if (!configured_dimension.empty() ||
++			(g_settings->getNoEx("dimension", configured_dimension) &&
++			!configured_dimension.empty())) {
+ 		if (!dimension::exists(m_path_world, configured_dimension)) {
+ 			throw ServerError("Dimension \"" + configured_dimension +
+ 				"\" does not exist. Create it first (/newdimension on the main "
+@@ -842,7 +878,7 @@ void Server::AsyncRunStep(float dtime, bool initial_step)
+ 	// send masterserver announce
+ 	{
+ 		float &counter = m_masterserver_timer;
+-		if (!isSingleplayer() && (!counter || counter >= 300.0) &&
++		if (!isSingleplayer() && m_announce && (!counter || counter >= 300.0) &&
+ 				g_settings->getBool("server_announce")) {
+ 			ServerList::sendAnnounce(counter ? ServerList::AA_UPDATE :
+ 						ServerList::AA_START,
+@@ -4247,7 +4283,11 @@ bool Server::createDimension(const std::string &name,
+ 		const std::vector<std::pair<std::string, std::string>> &map_settings,
+ 		std::string &error)
+ {
+-	return dimension::create(m_path_world, name, map_settings, error);
++	if (!dimension::create(m_path_world, name, map_settings, error))
++		return false;
++	if (m_dimension_created_cb)
++		m_dimension_created_cb(name);
++	return true;
+ }
+ 
+ bool Server::requestDimensionSwitch(const std::string &name, std::string &error)
+@@ -4257,6 +4297,11 @@ bool Server::requestDimensionSwitch(const std::string &name, std::string &error)
+ 			"dimension and set dimension_servers (see doc/dimensions.md)";
+ 		return false;
+ 	}
++	if (!m_bound_dimension.empty()) {
++		error = "the world \"" + name + "\" has no server (yet): its server is "
++			"still starting, try again in a few seconds";
++		return false;
++	}
+ 	if (!dimension::exists(m_path_world, name)) {
+ 		error = "unknown dimension \"" + name + "\"";
+ 		return false;
+diff --git a/src/server.h b/src/server.h
+index 95a8176..23b1a28 100644
+--- a/src/server.h
++++ b/src/server.h
+@@ -15,6 +15,7 @@
+ #include "util/metricsbackend.h"
+ #include "server/clientiface.h"
+ #include "subworld.h"
++#include <functional>
+ #include "threading/ordered_mutex.h"
+ #include "translation.h"
+ #include "sound_spec.h"
+@@ -189,7 +190,11 @@ class Server : public con::PeerHandler, public MapEventReceiver,
+ 		Address bind_addr,
+ 		bool dedicated,
+ 		ChatInterface *iface = nullptr,
+-		std::string *shutdown_errmsg = nullptr
++		std::string *shutdown_errmsg = nullptr,
++		// Several servers can run in one process (one per dimension, see
++		// client/dimensionhost.h). A non-empty value binds this server to the
++		// given dimension (overrides the \"dimension\" setting).
++		const std::string &bound_dimension = ""
+ 	);
+ 	~Server();
+ 	DISABLE_CLASS_COPY(Server);
+@@ -362,6 +367,11 @@ class Server : public con::PeerHandler, public MapEventReceiver,
+ 
+ 	// --- Dimensions: separate worlds inside the world folder (see dimension.h) ---
+ 	const std::string &getCurrentDimension() const { return m_dimension; }
++	void setMasterAnnounce(bool announce) { m_announce = announce; }
++	// Notified after a dimension was created (by /newdimension or a mod).
++	// Set it before start().
++	void setDimensionCreatedCallback(std::function<void(const std::string &)> cb)
++			{ m_dimension_created_cb = std::move(cb); }
+ 	// Directory with the map of the current dimension
+ 	std::string getDimensionPath() const;
+ 	std::vector<std::string> listDimensions() const;
+@@ -704,6 +714,12 @@ class Server : public con::PeerHandler, public MapEventReceiver,
+ 	bool m_simple_singleplayer_mode;
+ 	// Dimension whose map is loaded (see dimension.h)
+ 	std::string m_dimension = "overworld";
++	// Dimension this server was explicitly bound to (empty: use settings)
++	std::string m_bound_dimension;
++	// Whether this server may announce itself to the server list
++	bool m_announce = true;
++	// Called (from any thread) after a dimension was created
++	std::function<void(const std::string &)> m_dimension_created_cb;
+ 	std::atomic<bool> m_dimension_switch_requested{false};
+ 	u16 m_max_chatmessage_length;
+ 	// For "dedicated" server list flag
