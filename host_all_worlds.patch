@@ -1,16 +1,22 @@
 diff --git a/builtin/game/dimensions.lua b/builtin/game/dimensions.lua
-index 2e3f351..8dccdb1 100644
+index 2e3f351..d3349d1 100644
 --- a/builtin/game/dimensions.lua
 +++ b/builtin/game/dimensions.lua
-@@ -25,6 +25,7 @@ local S = core.get_translator("__builtin")
+@@ -23,8 +23,13 @@
  
+ local S = core.get_translator("__builtin")
+ 
++-- core.dimension_arriving[name] is true while a player who travelled from
++-- another world is being put in place (during that join).
++core.dimension_arriving = {}
++
  local META_POS = "dimension_pos:"          -- last position in a dimension
  local META_ARRIVAL = "dimension_arrival"   -- where to appear after the restart
 +local META_CURRENT = "dimension_current"   -- dimension the player was last in
  
  local MAPGENS = {
  	v5 = true, v6 = true, v7 = true, valleys = true,
-@@ -158,6 +159,33 @@ end
+@@ -158,13 +163,44 @@ end
  core.register_on_joinplayer(function(player)
  	local meta = player:get_meta()
  	local arrival = meta:get_string(META_ARRIVAL)
@@ -20,7 +26,8 @@ index 2e3f351..8dccdb1 100644
 +	-- another dimension continues there (their saved position belongs to
 +	-- that dimension's map).
 +	local last = meta:get_string(META_CURRENT)
-+	if arrival == "" and last ~= "" and last ~= here and not core.is_singleplayer() then
++	if arrival == "" and last ~= "" and last ~= here and not core.is_singleplayer()
++			and core.settings:get_bool("dimension_rejoin_last", true) then
 +		local host, port = get_dimension_server(last)
 +		if port then
 +			local name = player:get_player_name()
@@ -44,6 +51,16 @@ index 2e3f351..8dccdb1 100644
  	if arrival == "" then
  		return
  	end
+ 	meta:set_string(META_ARRIVAL, "")
+ 
+ 	local name = player:get_player_name()
++	-- Mods can tell a travel arrival from an ordinary login
++	core.dimension_arriving[name] = true
+ 	core.after(0, function()
++		core.dimension_arriving[name] = nil
+ 		local p = core.get_player_by_name(name)
+ 		if not p then
+ 			return
 diff --git a/doc/dimensions.md b/doc/dimensions.md
 index 4af7154..1dbaa2f 100644
 --- a/doc/dimensions.md
