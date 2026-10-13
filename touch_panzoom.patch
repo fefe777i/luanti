@@ -1,0 +1,568 @@
+diff --git a/doc/lua_api.md b/doc/lua_api.md
+index 110bbcd..d7020e4 100644
+--- a/doc/lua_api.md
++++ b/doc/lua_api.md
+@@ -3192,6 +3192,29 @@ Elements
+ * End of a scroll_container, following elements are no longer bound to this
+   container.
+ 
++### `pan_zoom_container[<X>,<Y>;<W>,<H>;<name>;<zoom>;<min_zoom>,<max_zoom>]`
++
++* Requires real coordinates. A clipped area whose content can be dragged in
++  any direction with a finger or the mouse and zoomed with two fingers or the
++  mouse wheel. There are no scrollbars.
++* Elements after this one are placed inside the area (positions are relative
++  to its top-left corner), until `pan_zoom_container_end[]`.
++* `zoom` is the zoom the content is currently drawn at, `min_zoom`/`max_zoom`
++  limit the gesture (defaults: 1, 0.2 and 4).
++* While a gesture is going on the engine moves/scales the elements itself.
++  When it ends, the field `name` is sent as `"PZ:<scale>,<ux>,<uy>"`: a point
++  (x, y) of the content (formspec units from the top-left corner of the area)
++  is now at (scale * x + ux, scale * y + uy). The mod stores the new view and
++  redraws the content.
++* A tap (touch without dragging) is sent as the field `name` = `"TAP:<x>,<y>"`
++  (formspec units from the top-left corner of the area), so the mod can
++  decide what was tapped. Do not put buttons that need dragging over the
++  area: a drag that starts on a button does not move the content.
++
++### `pan_zoom_container_end[]`
++
++* End of a pan_zoom_container.
++
+ ### `list[<inventory location>;<list name>;<X>,<Y>;<W>,<H>;<starting item index>]`
+ 
+ * Show an inventory list if it has been sent to the client.
+diff --git a/src/gui/CMakeLists.txt b/src/gui/CMakeLists.txt
+index 8b500ac..fc48944 100644
+--- a/src/gui/CMakeLists.txt
++++ b/src/gui/CMakeLists.txt
+@@ -21,6 +21,7 @@ set(gui_SRCS
+ 	${CMAKE_CURRENT_SOURCE_DIR}/guiPathSelectMenu.cpp
+ 	${CMAKE_CURRENT_SOURCE_DIR}/guiScene.cpp
+ 	${CMAKE_CURRENT_SOURCE_DIR}/guiScrollBar.cpp
++	${CMAKE_CURRENT_SOURCE_DIR}/guiPanZoom.cpp
+ 	${CMAKE_CURRENT_SOURCE_DIR}/guiScrollContainer.cpp
+ 	${CMAKE_CURRENT_SOURCE_DIR}/guiTable.cpp
+ 	${CMAKE_CURRENT_SOURCE_DIR}/guiHyperText.cpp
+diff --git a/src/gui/guiFormSpecMenu.cpp b/src/gui/guiFormSpecMenu.cpp
+index 6bad3cd..c85c27c 100644
+--- a/src/gui/guiFormSpecMenu.cpp
++++ b/src/gui/guiFormSpecMenu.cpp
+@@ -49,6 +49,7 @@
+ #include "guiInventoryList.h"
+ #include "guiItemImage.h"
+ #include "guiScrollContainer.h"
++#include "guiPanZoom.h"
+ #include "guiHyperText.h"
+ #include "guiScene.h"
+ 
+@@ -446,6 +447,94 @@ void GUIFormSpecMenu::parseScrollContainerEnd(parserData *data, const std::strin
+ 	container_stack.pop();
+ }
+ 
++// pan_zoom_container[<X>,<Y>;<W>,<H>;<name>;<zoom>;<min_zoom>,<max_zoom>]
++void GUIFormSpecMenu::parsePanZoomContainer(parserData *data, const std::string &element)
++{
++	std::vector<std::string> parts;
++	if (!precheckElement("pan_zoom_container start", element, 3, 5, parts))
++		return;
++
++	std::vector<std::string> v_pos  = split(parts[0], ',');
++	std::vector<std::string> v_geom = split(parts[1], ',');
++	std::string name = parts[2];
++	f32 zoom = 1.0f;
++	if (parts.size() >= 4 && !parts[3].empty())
++		zoom = stof(parts[3]);
++	f32 min_zoom = 0.2f, max_zoom = 4.0f;
++	if (parts.size() >= 5 && !parts[4].empty()) {
++		std::vector<std::string> v_lim = split(parts[4], ',');
++		if (v_lim.size() == 2) {
++			min_zoom = stof(v_lim[0]);
++			max_zoom = stof(v_lim[1]);
++		}
++	}
++
++	MY_CHECKPOS("pan_zoom_container", 0);
++	MY_CHECKGEOM("pan_zoom_container", 1);
++
++	v2s32 pos = getRealCoordinateBasePos(v_pos);
++	v2s32 geom = getRealCoordinateGeometry(v_geom);
++
++	FieldSpec spec(name, L"", L"", 258 + m_fields.size());
++	spec.ftype = f_PanZoom;
++	m_fields.push_back(spec);
++
++	GUIPanZoom *pz = new GUIPanZoom(Environment, data->current_parent, spec.fid,
++			core::rect<s32>(pos, pos + geom), imgsize.X, zoom, min_zoom, max_zoom);
++	// Sends "<value>" as the field `name` to the server
++	auto send_field = [this, name](const std::string &value) {
++		for (FieldSpec &s : m_fields) {
++			if (s.ftype == f_PanZoom && s.fname == name) {
++				s.fdefault = utf8_to_wide(value);
++				s.send = true;
++				acceptInput(quit_mode_no);
++				s.send = false;
++				break;
++			}
++		}
++	};
++	pz->setGestureEndCallback([send_field](f32 scale, f32 ux, f32 uy) {
++		send_field("PZ:" + ftos(scale) + "," + ftos(ux) + "," + ftos(uy));
++	});
++	pz->setTapCallback([send_field](f32 x, f32 y) {
++		send_field("TAP:" + ftos(x) + "," + ftos(y));
++	});
++
++	m_pan_zooms.emplace_back(name, pz); // keeps the reference from `new`
++	data->current_parent = pz;
++
++	// remove interfering offset of normal containers
++	container_stack.push(pos_offset);
++	pos_offset.X = 0.0f;
++	pos_offset.Y = 0.0f;
++}
++
++void GUIFormSpecMenu::parsePanZoomContainerEnd(parserData *data, const std::string &)
++{
++	if (!dynamic_cast<GUIPanZoom *>(data->current_parent) || container_stack.empty()) {
++		errorstream << "Invalid pan_zoom_container end element, "
++				<< "no matching pan_zoom_container start element" << std::endl;
++		return;
++	}
++	if (pos_offset.getLengthSQ() != 0.0f) {
++		errorstream << "Invalid pan_zoom_container end element, "
++				<< "an inner container was left open" << std::endl;
++		return;
++	}
++	data->current_parent = data->current_parent->getParent();
++	pos_offset = container_stack.top();
++	container_stack.pop();
++}
++
++bool GUIFormSpecMenu::preprocessTouch(const SEvent &event)
++{
++	for (auto &pz : m_pan_zooms) {
++		if (pz.second->handleTouch(event))
++			return true;
++	}
++	return false;
++}
++
+ void GUIFormSpecMenu::parseList(parserData *data, const std::string &element)
+ {
+ 	MY_CHECKCLIENT("list");
+@@ -2928,6 +3017,8 @@ void GUIFormSpecMenu::removeAll()
+ 		clickthrough_it->drop();
+ 	for (auto &scroll_container_it : m_scroll_containers)
+ 		scroll_container_it.second->drop();
++	for (auto &pan_zoom_it : m_pan_zooms)
++		pan_zoom_it.second->drop();
+ }
+ 
+ const std::unordered_map<std::string, std::function<void(GUIFormSpecMenu*, GUIFormSpecMenu::parserData *data,
+@@ -2975,6 +3066,8 @@ const std::unordered_map<std::string, std::function<void(GUIFormSpecMenu*, GUIFo
+ 		{"scrollbaroptions",       &GUIFormSpecMenu::parseScrollBarOptions},
+ 		{"scroll_container",       &GUIFormSpecMenu::parseScrollContainer},
+ 		{"scroll_container_end",   &GUIFormSpecMenu::parseScrollContainerEnd},
++		{"pan_zoom_container",     &GUIFormSpecMenu::parsePanZoomContainer},
++		{"pan_zoom_container_end", &GUIFormSpecMenu::parsePanZoomContainerEnd},
+ 		{"set_focus",              &GUIFormSpecMenu::parseSetFocus},
+ 		{"model",                  &GUIFormSpecMenu::parseModel},
+ 		{"allow_close",            &GUIFormSpecMenu::parseAllowClose},
+@@ -3081,6 +3174,7 @@ void GUIFormSpecMenu::regenerateGui(v2u32 screensize)
+ 	m_inventory_rings.clear();
+ 	m_dropdowns.clear();
+ 	m_scroll_containers.clear();
++	m_pan_zooms.clear();
+ 	theme_by_name.clear();
+ 	theme_by_type.clear();
+ 	m_clickthrough_elements.clear();
+@@ -4081,6 +4175,8 @@ void GUIFormSpecMenu::acceptInput(FormspecQuitMode quitmode)
+ 						else
+ 							fields[name] = "VAL:" + itos(e->getPos());
+ 					}
++				} else if (s.ftype == f_PanZoom) {
++					fields[name] = wide_to_utf8(s.fdefault);
+ 				} else if (s.ftype == f_AnimatedImage) {
+ 					IGUIElement *element = getElementFromId(s.fid, true);
+ 					GUIAnimatedImage *e = nullptr;
+diff --git a/src/gui/guiFormSpecMenu.h b/src/gui/guiFormSpecMenu.h
+index e650312..b11475c 100644
+--- a/src/gui/guiFormSpecMenu.h
++++ b/src/gui/guiFormSpecMenu.h
+@@ -27,6 +27,7 @@ class InventoryManager;
+ class ISimpleTextureSource;
+ class Client;
+ class GUIScrollContainer;
++class GUIPanZoom;
+ class ISoundManager;
+ class IShaderSource;
+ 
+@@ -41,6 +42,7 @@ enum FormspecFieldType {
+ 	f_ItemImage,
+ 	f_HyperText,
+ 	f_AnimatedImage,
++	f_PanZoom,
+ 	f_Unknown
+ };
+ 
+@@ -273,6 +275,7 @@ class GUIFormSpecMenu : public GUIModalMenu
+ 
+ 	void acceptInput(FormspecQuitMode quitmode=quit_mode_no);
+ 	bool preprocessEvent(const SEvent& event) override;
++	bool preprocessTouch(const SEvent &event) override;
+ 	bool OnEvent(const SEvent& event) override;
+ 
+ 	bool doPause = false;
+@@ -356,6 +359,7 @@ class GUIFormSpecMenu : public GUIModalMenu
+ 	std::vector<std::pair<FieldSpec, std::vector<std::string>>> m_dropdowns;
+ 	std::vector<gui::IGUIElement *> m_clickthrough_elements;
+ 	std::vector<std::pair<std::string, GUIScrollContainer *>> m_scroll_containers;
++	std::vector<std::pair<std::string, GUIPanZoom *>> m_pan_zooms;
+ 
+ 	std::unique_ptr<GUIInventoryList::ItemSpec> m_selected_item;
+ 	u16 m_selected_amount = 0;
+@@ -452,6 +456,8 @@ class GUIFormSpecMenu : public GUIModalMenu
+ 	void parseContainerEnd(parserData* data, const std::string &element);
+ 	void parseScrollContainer(parserData *data, const std::string &element);
+ 	void parseScrollContainerEnd(parserData *data, const std::string &element);
++	void parsePanZoomContainer(parserData *data, const std::string &element);
++	void parsePanZoomContainerEnd(parserData *data, const std::string &element);
+ 	void parseList(parserData* data, const std::string &element);
+ 	void parseListRing(parserData* data, const std::string &element);
+ 	void parseCheckbox(parserData* data, const std::string &element);
+diff --git a/src/gui/guiPanZoom.cpp b/src/gui/guiPanZoom.cpp
+new file mode 100644
+index 0000000..3dc3e8c
+--- /dev/null
++++ b/src/gui/guiPanZoom.cpp
+@@ -0,0 +1,199 @@
++// Luanti
++// SPDX-License-Identifier: LGPL-2.1-or-later
++
++#include "guiPanZoom.h"
++#include <IGUIEnvironment.h>
++#include <algorithm>
++#include <cmath>
++
++GUIPanZoom::GUIPanZoom(gui::IGUIEnvironment *env, gui::IGUIElement *parent, s32 id,
++		const core::rect<s32> &rectangle, f32 unit_px, f32 zoom, f32 min_zoom,
++		f32 max_zoom) :
++	gui::IGUIElement(gui::EGUIET_ELEMENT, env, parent, id, rectangle),
++	m_unit_px(unit_px > 0.0f ? unit_px : 1.0f),
++	m_zoom(zoom > 0.0f ? zoom : 1.0f),
++	m_min_zoom(min_zoom > 0.0f ? min_zoom : 0.1f),
++	m_max_zoom(max_zoom >= m_min_zoom ? max_zoom : 10.0f)
++{
++}
++
++f32 GUIPanZoom::clampScale(f32 total) const
++{
++	// the content is drawn at zoom m_zoom: keep m_zoom * total in range
++	return std::clamp(total, m_min_zoom / m_zoom, m_max_zoom / m_zoom);
++}
++
++void GUIPanZoom::beginGesture()
++{
++	m_gesture = true;
++	m_scale = 1.0f;
++	m_u = v2f32(0.0f, 0.0f);
++	m_base.clear();
++	for (gui::IGUIElement *child : Children)
++		m_base.push_back(child->getRelativePosition());
++}
++
++void GUIPanZoom::applyTransform()
++{
++	size_t i = 0;
++	for (gui::IGUIElement *child : Children) {
++		if (i >= m_base.size())
++			break;
++		const core::rect<s32> &r = m_base[i++];
++		core::rect<s32> n(
++				(s32)std::lround(m_scale * r.UpperLeftCorner.X + m_u.X),
++				(s32)std::lround(m_scale * r.UpperLeftCorner.Y + m_u.Y),
++				(s32)std::lround(m_scale * r.LowerRightCorner.X + m_u.X),
++				(s32)std::lround(m_scale * r.LowerRightCorner.Y + m_u.Y));
++		child->setRelativePosition(n);
++	}
++}
++
++void GUIPanZoom::endGesture()
++{
++	if (!m_gesture)
++		return;
++	m_gesture = false;
++	m_pinching = false;
++	m_pressed = false;
++	if (m_scale == 1.0f && m_u.X == 0.0f && m_u.Y == 0.0f)
++		return;
++	if (m_on_end)
++		m_on_end(m_scale, m_u.X / m_unit_px, m_u.Y / m_unit_px);
++}
++
++bool GUIPanZoom::OnEvent(const SEvent &event)
++{
++	if (event.EventType != EET_MOUSE_INPUT_EVENT)
++		return IGUIElement::OnEvent(event);
++
++	const auto &m = event.MouseInput;
++	const v2s32 p(m.X, m.Y);
++	const s32 DRAG_THRESHOLD_PX = 10;
++
++	switch (m.Event) {
++	case EMIE_LMOUSE_PRESSED_DOWN:
++		m_pressed = true;
++		m_press_pos = m_last_pos = p;
++		break;
++
++	case EMIE_MOUSE_MOVED: {
++		if (!m.isLeftPressed() || m_pinching)
++			break;
++		if (!m_pressed) {
++			// the press went to a previous version of this formspec
++			m_pressed = true;
++			m_press_pos = m_last_pos = p;
++		}
++		if (!m_gesture) {
++			s32 dx = p.X - m_press_pos.X, dy = p.Y - m_press_pos.Y;
++			if (std::abs(dx) <= DRAG_THRESHOLD_PX && std::abs(dy) <= DRAG_THRESHOLD_PX)
++				break;
++			beginGesture();
++			m_last_pos = m_press_pos; // include the distance covered so far
++		}
++		m_u.X += p.X - m_last_pos.X;
++		m_u.Y += p.Y - m_last_pos.Y;
++		m_last_pos = p;
++		applyTransform();
++		return true;
++	}
++
++	case EMIE_LMOUSE_LEFT_UP:
++		if (m_gesture) {
++			endGesture();
++			return true; // do not also click the element under the finger
++		}
++		if (m_pressed && m_on_tap && AbsoluteClippingRect.isPointInside(p)) {
++			m_pressed = false;
++			v2s32 lp = local(p);
++			m_on_tap(lp.X / m_unit_px, lp.Y / m_unit_px);
++			return true;
++		}
++		m_pressed = false;
++		break;
++
++	case EMIE_MOUSE_WHEEL: {
++		if (!AbsoluteClippingRect.isPointInside(p))
++			break;
++		if (m_gesture)
++			endGesture();
++		beginGesture();
++		f32 s = std::pow(1.15f, m.Wheel);
++		f32 ns = clampScale(s) ;
++		v2f32 pivot((f32)local(p).X, (f32)local(p).Y);
++		m_scale = ns;
++		m_u = pivot - pivot * ns;   // zoom around the cursor
++		applyTransform();
++		endGesture();
++		return true;
++	}
++
++	default:
++		break;
++	}
++	return IGUIElement::OnEvent(event);
++}
++
++bool GUIPanZoom::handleTouch(const SEvent &event)
++{
++	const auto &t = event.TouchInput;
++	const v2s32 p(t.X, t.Y);
++
++	switch (t.Event) {
++	case ETIE_PRESSED_DOWN:
++		m_touches[t.ID] = p;
++		if (m_touches.size() == 2 && m_pressed && !m_pinching) {
++			// a second finger while the first one is on us: pinch
++			if (!m_gesture)
++				beginGesture();
++			auto it = m_touches.begin();
++			v2s32 a = local(it->second);
++			++it;
++			v2s32 b = local(it->second);
++			m_pinch_dist0 = std::max(1.0f, (f32)(a - b).getLength());
++			m_pinch_c0 = v2f32((a.X + b.X) * 0.5f, (a.Y + b.Y) * 0.5f);
++			m_pinch_scale0 = m_scale;
++			m_pinch_u0 = m_u;
++			m_pinching = true;
++			return true;
++		}
++		return false;
++
++	case ETIE_MOVED:
++		m_touches[t.ID] = p;
++		if (m_pinching && m_touches.size() >= 2) {
++			auto it = m_touches.begin();
++			v2s32 a = local(it->second);
++			++it;
++			v2s32 b = local(it->second);
++			f32 dist = std::max(1.0f, (f32)(a - b).getLength());
++			v2f32 c1((a.X + b.X) * 0.5f, (a.Y + b.Y) * 0.5f);
++			f32 total = clampScale(m_pinch_scale0 * dist / m_pinch_dist0);
++			f32 s = total / m_pinch_scale0;
++			m_scale = total;
++			m_u = c1 + (m_pinch_u0 - m_pinch_c0) * s;
++			applyTransform();
++			return true;
++		}
++		return false;
++
++	case ETIE_LEFT_UP:
++		m_touches.erase(t.ID);
++		if (m_pinching) {
++			m_pinching = false;
++			if (m_touches.empty()) {
++				endGesture();
++			} else {
++				// the remaining finger keeps dragging
++				m_last_pos = m_touches.begin()->second;
++				m_press_pos = m_last_pos;
++			}
++			return true;
++		}
++		return false;
++
++	default:
++		return false;
++	}
++}
+diff --git a/src/gui/guiPanZoom.h b/src/gui/guiPanZoom.h
+new file mode 100644
+index 0000000..ae6ad47
+--- /dev/null
++++ b/src/gui/guiPanZoom.h
+@@ -0,0 +1,81 @@
++// Luanti
++// SPDX-License-Identifier: LGPL-2.1-or-later
++
++#pragma once
++
++#include "irr_v2d.h"
++#include <IGUIElement.h>
++#include <functional>
++#include <map>
++#include <vector>
++
++/*
++	pan_zoom_container: a clipped area whose content can be dragged in ANY
++	direction with a finger (or the mouse) and zoomed with two fingers (or the
++	mouse wheel). There are no scrollbars.
++
++	While a gesture is going on the content is transformed locally (smooth,
++	no network round trip). When the gesture ends the transformation is
++	reported through the callback and sent to the server as the field value
++
++		"PZ:<scale>,<ux>,<uy>"
++
++	which means: a point (x, y) of the content, measured from the container's
++	top-left corner in formspec units, is now at (scale*x + ux, scale*y + uy).
++	The server then redraws the content with its new view.
++*/
++class GUIPanZoom : public gui::IGUIElement
++{
++public:
++	GUIPanZoom(gui::IGUIEnvironment *env, gui::IGUIElement *parent, s32 id,
++			const core::rect<s32> &rectangle, f32 unit_px, f32 zoom,
++			f32 min_zoom, f32 max_zoom);
++
++	// scale, ux, uy (in formspec units)
++	using GestureEnd = std::function<void(f32, f32, f32)>;
++	void setGestureEndCallback(GestureEnd cb) { m_on_end = std::move(cb); }
++
++	// A tap (press and release without dragging) at (x, y) formspec units
++	// from the container's top-left corner.
++	using Tap = std::function<void(f32, f32)>;
++	void setTapCallback(Tap cb) { m_on_tap = std::move(cb); }
++
++	bool OnEvent(const SEvent &event) override;
++
++	// Raw touch events (before they are turned into mouse events).
++	// Returns true if the event was consumed (pinch gesture).
++	bool handleTouch(const SEvent &event);
++
++private:
++	void beginGesture();
++	void endGesture();
++	void applyTransform();
++	f32 clampScale(f32 total) const;
++	v2s32 local(v2s32 p) const
++	{
++		return p - AbsoluteRect.UpperLeftCorner;
++	}
++
++	f32 m_unit_px;
++	f32 m_zoom, m_min_zoom, m_max_zoom;
++	GestureEnd m_on_end;
++	Tap m_on_tap;
++
++	// content transform of the current gesture: x' = m_scale * x + m_u
++	bool m_gesture = false;
++	f32 m_scale = 1.0f;
++	v2f32 m_u;
++	std::vector<core::rect<s32>> m_base; // children's rectangles at the start
++
++	// single pointer
++	bool m_pressed = false;
++	v2s32 m_press_pos, m_last_pos;
++
++	// fingers currently touching the screen
++	std::map<size_t, v2s32> m_touches;
++	bool m_pinching = false;
++	f32 m_pinch_dist0 = 1.0f;
++	v2f32 m_pinch_c0;
++	f32 m_pinch_scale0 = 1.0f;
++	v2f32 m_pinch_u0;
++};
+diff --git a/src/gui/guiScrollContainer.cpp b/src/gui/guiScrollContainer.cpp
+index fea95fd..060ef70 100644
+--- a/src/gui/guiScrollContainer.cpp
++++ b/src/gui/guiScrollContainer.cpp
+@@ -68,7 +68,9 @@ bool GUIScrollContainer::OnEvent(const SEvent &event)
+ 			if (m_drag_active) {
+ 				f32 factor = (m_scrollfactor != 0.0f) ? m_scrollfactor : 1.0f;
+ 				s32 delta_scroll = (s32)(delta_px / factor);
+-				m_scrollbar->setPos(m_drag_start_scrollbar_pos - delta_scroll);
++				// scroll_container's factor is negative (offset = pos * factor), so
++				// the position must change in the same direction as the finger.
++				m_scrollbar->setPos(m_drag_start_scrollbar_pos + delta_scroll);
+ 				updateScrolling();
+ 				return true;
+ 			}
+diff --git a/src/gui/modalMenu.cpp b/src/gui/modalMenu.cpp
+index 6431cd2..6e07ea7 100644
+--- a/src/gui/modalMenu.cpp
++++ b/src/gui/modalMenu.cpp
+@@ -306,6 +306,9 @@ bool GUIModalMenu::preprocessEvent(const SEvent &event)
+ 		irr_ptr<GUIModalMenu> holder;
+ 		holder.grab(this); // keep this alive until return (it might be dropped downstream [?])
+ 
++		if (preprocessTouch(event))
++			return true;
++
+ 		if (event.TouchInput.touchedCount == 1) {
+ 			m_pointer = v2s32(event.TouchInput.X, event.TouchInput.Y);
+ 
+diff --git a/src/gui/modalMenu.h b/src/gui/modalMenu.h
+index c37147d..d52adc8 100644
+--- a/src/gui/modalMenu.h
++++ b/src/gui/modalMenu.h
+@@ -48,6 +48,9 @@ class GUIModalMenu : public gui::IGUIElement
+ 	virtual void regenerateGui(v2u32 screensize) = 0;
+ 	virtual void drawMenu() = 0;
+ 	virtual bool preprocessEvent(const SEvent &event);
++	// Every raw touch event, before it is converted into mouse events.
++	// Return true to consume it (multi-touch gestures).
++	virtual bool preprocessTouch(const SEvent &event) { return false; }
+ 	virtual bool OnEvent(const SEvent &event) { return false; };
+ 	virtual bool pausesGame() { return false; } // Used for pause menu
+ #ifdef __ANDROID__
