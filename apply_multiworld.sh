@@ -1,15 +1,19 @@
 #!/bin/bash
-# Applies host_all_worlds.patch (one server per dimension for "Host game").
-# Safe to run several times.
+# Applies all engine patches. Safe to run several times.
+#   host_all_worlds.patch - one server per dimension for "Host game"
+#   touch_panzoom.patch   - pan_zoom_container + fixed touch scrolling
 set -e
 cd "$(dirname "$0")"
 
-if git apply --reverse --check host_all_worlds.patch >/dev/null 2>&1; then
-	echo "host_all_worlds.patch: already applied."
-elif git apply --check host_all_worlds.patch >/dev/null 2>&1; then
-	git apply host_all_worlds.patch
-	echo "host_all_worlds.patch: applied."
-else
-	echo "host_all_worlds.patch: cannot be applied (conflict)."
-	exit 1
-fi
+for patch in host_all_worlds.patch touch_panzoom.patch; do
+	[ -f "$patch" ] || continue
+	if git apply --reverse --check "$patch" >/dev/null 2>&1; then
+		echo "$patch: already applied."
+	elif git apply --check "$patch" >/dev/null 2>&1; then
+		git apply "$patch"
+		echo "$patch: applied."
+	else
+		echo "$patch: cannot be applied (conflict)."
+		exit 1
+	fi
+done
