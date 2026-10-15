@@ -341,6 +341,11 @@ void GUIEngine::run()
 
 	fps_control.reset();
 
+#ifdef __ANDROID__
+	f32 file_pick_poll_timer = 0.0f;
+	bool file_was_picked = false;
+#endif
+
 	auto framemarker = FrameMarker("GUIEngine::run()-frame").started();
 
 	while (m_rendering_engine->run() && !m_startgame && !m_kill) {
@@ -402,6 +407,19 @@ void GUIEngine::run()
 		}
 
 		m_script->step();
+
+#ifdef __ANDROID__
+		// Workshop 47: tell the menu script as soon as the skin file picker
+		// has finished, so the menu refreshes without waiting for a tap.
+		file_pick_poll_timer += dtime;
+		if (file_pick_poll_timer >= 0.1f) {
+			file_pick_poll_timer = 0.0f;
+			bool picked = porting::isFilePickedAndroid();
+			if (picked && !file_was_picked)
+				m_script->handleMainMenuEvent("FilePicked");
+			file_was_picked = picked;
+		}
+#endif
 
 		sound_volume_control(m_sound_manager.get(), device->isWindowActive());
 		m_sound_manager->step(dtime);

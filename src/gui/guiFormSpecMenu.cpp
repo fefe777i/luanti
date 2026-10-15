@@ -2842,6 +2842,12 @@ void GUIFormSpecMenu::parseModel(parserData *data, const std::string &element)
 		if (file) {
 			mesh = model_smgr->getMesh(file);
 			file->drop();
+			// The scene manager keeps the mesh in its cache and getMesh()
+			// does not grab it. We drop() it below like Client::getMesh()
+			// users do, so take our own reference first. Without this the
+			// cache is left with a dangling pointer after the first redraw.
+			if (mesh)
+				mesh->grab();
 		}
 	}
 

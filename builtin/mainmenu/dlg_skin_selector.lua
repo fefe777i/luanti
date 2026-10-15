@@ -33,7 +33,7 @@ local function get_formspec(data)
 
 	local new_skin_msg = ""
 	if data.new_skin_name and data.new_skin_name ~= "" then
-		new_skin_msg = "label[0.5,5.8;" .. core.colorize("#00ff00",
+		new_skin_msg = "label[0.5,5.5;" .. core.colorize("#00ff00",
 			"Added: " .. core.formspec_escape(data.new_skin_name)) .. "]"
 	end
 
@@ -47,7 +47,12 @@ local function get_formspec(data)
 		"label[0.5,0.8;", fgettext("Choose how you look on servers"), "]",
 
 		"label[0.5,1.4;", fgettext("Available skins:"), "]",
-		"textlist[0.5,1.8;7,2.8;skin_list;", list_str, ";", sel, "]",
+		"textlist[0.5,1.8;4,2.8;skin_list;", list_str, ";", sel, "]",
+
+		-- Live preview of the highlighted skin
+		"box[4.8,1.4;2.7,3.9;", ws47_theme.COLOR_BG_2, "]",
+		ws47_theme.player_model(4.85, 1.45, 2.6, 3.8,
+			skin_dir .. DIR_DELIM .. skin_file),
 
 		new_skin_msg,
 
@@ -55,7 +60,7 @@ local function get_formspec(data)
 
 		"button[0.5,5.9;2,0.7;btn_skin_select;", fgettext("Wear Skin"), "]",
 		"button[2.7,5.9;2,0.7;btn_skin_back;", fgettext("Back"), "]",
-		"button[4.9,5.9;2,0.7;btn_skin_add;", fgettext("+ Add Skin"), "]",
+		"button[4.9,5.9;2.6,0.7;btn_skin_add;", fgettext("+ Add Skin"), "]",
 
 		"label[0.5,6.7;", core.colorize("#aaaaaa",
 			fgettext("Skins folder: ") .. skin_dir), "]",
@@ -79,19 +84,6 @@ local function handle_buttons(this, fields)
 		return true
 	end
 
-	if this.data.pick_pending and core.is_file_picked then
-		if core.is_file_picked() then
-			local path = core.get_picked_skin_path()
-			if path and path ~= "" then
-				this.data.new_skin_name = path
-				this.data.pick_pending = false
-				local skins, dir = get_skins()
-				this.data.skins = skins
-				return true
-			end
-		end
-	end
-
 	if fields.btn_skin_select then
 		local skin = this.data.skins[this.data.selected or 1]
 		if skin then
@@ -111,8 +103,41 @@ local function handle_buttons(this, fields)
 	return false
 end
 
+-- Called by the engine ("FilePicked") as soon as the Android file picker is
+-- done, so the dialog updates immediately instead of on the next tap.
+local function on_file_picked(dlg)
+	if not dlg.data.pick_pending or not core.get_picked_skin_path then
+		return false
+	end
+	local path = core.get_picked_skin_path()
+	if not path or path == "" then
+		return false
+	end
+	dlg.data.pick_pending = false
+	local name = path:match("([^/\\]+)$") or path
+	dlg.data.new_skin_name = name
+	local skins, dir = get_skins()
+	dlg.data.skins = skins
+	dlg.data.skin_dir = dir
+	for i, n in ipairs(skins) do
+		if n == name then
+			dlg.data.selected = i
+			break
+		end
+	end
+	ui.update()
+	return true
+end
+
 function create_skin_selector_dlg()
-	local dlg = dialog_create("skin_selector", get_formspec, handle_buttons)
+	local dlg
+	dlg = dialog_create("skin_selector", get_formspec, handle_buttons,
+		function(event)
+			if event == "FilePicked" then
+				return on_file_picked(dlg)
+			end
+			return false
+		end)
 	local skins, dir = get_skins()
 	dlg.data.skins = skins
 	dlg.data.skin_dir = dir

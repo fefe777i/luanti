@@ -88,7 +88,7 @@ public class GameActivity extends SDLActivity {
 	private int selectionReturnValue = 0;
     // Skin file picker
     private String pickedFilePath = "";
-    private boolean filePicked = false;
+    private volatile boolean filePicked = false;
     private static final int PICK_SKIN_REQUEST = 1001;
 
 

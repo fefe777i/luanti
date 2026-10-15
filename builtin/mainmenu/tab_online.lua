@@ -17,6 +17,10 @@ local function get_formspec(tabview, name, tabdata)
 
 		"box[5.0,3.05;5.5,2.9;", ws47_theme.COLOR_BG_2, "]",
 
+		-- Player model with the chosen skin
+		"box[0.4,0.4;4.2,6.3;", ws47_theme.COLOR_BG_2, "]",
+		ws47_theme.player_model(0.5, 0.5, 4, 6.1),
+
 		-- Прозорі поля вводу (border=false ховає стандартний фон/рамку)
 		"style_type[field;border=false;textcolor=#ffffff]",
 		"style_type[pwdfield;border=false;textcolor=#ffffff]",

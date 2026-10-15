@@ -168,6 +168,14 @@ local function get_formspec(tabview, name, tabdata)
 	local retval = ws47_theme.STYLE_PREFIX ..
 		"box[0,0;" .. tostring(tabview.width) .. "," .. tostring(tabview.height) .. ";" .. ws47_theme.COLOR_BG .. "]"
 
+	-- Player model with the chosen skin (left column, below the checkboxes).
+	-- Hidden when hosting a server: the name/port fields use that space.
+	if not core.settings:get_bool("enable_server") then
+		retval = retval ..
+			"box[0.375,2.75;4.5,3.95;" .. ws47_theme.COLOR_BG_2 .. "]" ..
+			ws47_theme.player_model(0.45, 2.8, 4.35, 3.85)
+	end
+
 	local index = core.get_textlist_index("sp_worlds") or filterlist.get_current_index(menudata.worldlist,
 				tonumber(core.settings:get("mainmenu_last_selected_world"))) or 0
 
