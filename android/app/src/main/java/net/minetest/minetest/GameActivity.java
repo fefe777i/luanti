@@ -47,6 +47,8 @@ import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
 import android.graphics.Paint;
+import android.graphics.PorterDuff;
+import android.graphics.PorterDuffXfermode;
 import android.graphics.Rect;
 
 import androidx.annotation.Keep;
@@ -396,6 +398,55 @@ public class GameActivity extends SDLActivity {
                 new Rect(dx * s, dy * s, (dx + w) * s, (dy + h) * s), p);
     }
 
+    // Slim ("Alex") skins have 3 pixel wide arms, so the last two columns of
+    // the right arm area are empty.
+    private static boolean hasSlimArms(Bitmap src, int s) {
+        for (int x = 54 * s; x < 56 * s; x++) {
+            for (int y = 20 * s; y < 32 * s; y++) {
+                if ((src.getPixel(x, y) >>> 24) != 0) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    // Copies a 3 column wide face (starting at column sx) to a 4 column wide
+    // face (starting at column dx) by repeating the middle column.
+    private static final int[] WIDEN = {0, 1, 1, 2};
+
+    private static void widenFace(Canvas c, Bitmap src, int s, Paint p,
+            int sx, int dx, int y, int h) {
+        for (int i = 0; i < 4; i++) {
+            int col = sx + WIDEN[i];
+            c.drawBitmap(src,
+                    new Rect(col * s, y * s, (col + 1) * s, (y + h) * s),
+                    new Rect((dx + i) * s, y * s, (dx + i + 1) * s, (y + h) * s), p);
+        }
+    }
+
+    // Rebuilds the right arm (base layer and sleeve layer) of a slim skin
+    // with 4 pixel wide faces, like the arm of a normal skin.
+    private static Bitmap widenSlimArms(Bitmap src, int s) {
+        Bitmap out = src.copy(Bitmap.Config.ARGB_8888, true);
+        Canvas c = new Canvas(out);
+        Paint clear = new Paint();
+        clear.setXfermode(new PorterDuffXfermode(PorterDuff.Mode.CLEAR));
+        c.drawRect(40 * s, 16 * s, 56 * s, 48 * s, clear);
+        Paint p = new Paint();
+        p.setFilterBitmap(false);
+        p.setAntiAlias(false);
+        for (int y0 = 16; y0 <= 32; y0 += 16) {
+            widenFace(c, src, s, p, 44, 44, y0, 4);                    // top
+            widenFace(c, src, s, p, 47, 48, y0, 4);                    // bottom
+            skinOverlay(c, src, s, p, 40, y0 + 4, 4, 12, 40, y0 + 4);  // right side
+            widenFace(c, src, s, p, 44, 44, y0 + 4, 12);               // front
+            skinOverlay(c, src, s, p, 47, y0 + 4, 4, 12, 48, y0 + 4);  // left side
+            widenFace(c, src, s, p, 51, 52, y0 + 4, 12);               // back
+        }
+        return out;
+    }
+
     // Luanti skins are 64x32 or 128x64. Minecraft skins (64x64 or 128x128)
     // are converted: the outer layers (hat, jacket, sleeve, trouser) are
     // drawn over the base layers and the unused lower half is cut off.
@@ -408,6 +459,9 @@ public class GameActivity extends SDLActivity {
         }
         if ((w == 64 && h == 64) || (w == 128 && h == 128)) {
             int s = w / 64;
+            if (hasSlimArms(src, s)) {
+                src = widenSlimArms(src, s);
+            }
             Bitmap out = Bitmap.createBitmap(w, w / 2, Bitmap.Config.ARGB_8888);
             Canvas c = new Canvas(out);
             Paint p = new Paint();
