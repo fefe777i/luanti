@@ -357,6 +357,7 @@ public:
 
 	void drawLoadScreen(const std::wstring &text, float dtime, int percent);
 	void afterContentReceived();
+	void ws47SendSkin();
 	void showUpdateProgressTexture(void *args, float progress);
 
 	float getRTT();
@@ -502,6 +503,9 @@ private:
 	float m_connection_reinit_timer = 0.1f;
 	float m_avg_rtt_timer = 0.0f;
 	float m_playerpos_send_timer = 0.0f;
+	// Workshop 47: <0 = nothing to do, otherwise seconds since the client
+	// became ready; when it reaches the delay the chosen skin is uploaded.
+	float m_ws47_skin_timer = -1.0f;
 	int m_playerpos_repeat_count = 0;
 	IntervalLimiter m_map_timer_and_unload_interval;
 

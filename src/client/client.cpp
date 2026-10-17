@@ -19,6 +19,8 @@
 #include "client/texturesource.h"
 #include "camera.h"
 #include "filesys.h"
+#include "settings.h"
+#include "util/base64.h"
 #include "game.h"
 #include "gettext.h"
 #include "gettime.h"
@@ -467,6 +469,16 @@ void Client::step(float dtime)
 	m_animation_time = fmodf(m_animation_time + dtime, 60.0f);
 
 	ReceiveAll();
+
+	// Workshop 47: upload the skin chosen in the main menu shortly after
+	// joining (the server needs a moment to mark us as active).
+	if (m_ws47_skin_timer >= 0.0f) {
+		m_ws47_skin_timer += dtime;
+		if (m_ws47_skin_timer >= 2.0f) {
+			m_ws47_skin_timer = -1.0f;
+			ws47SendSkin();
+		}
+	}
 
 	/*
 		Packet counter
@@ -1358,6 +1370,34 @@ void Client::sendInventoryFields(const std::string &formname,
 	Send(&pkt);
 }
 
+// Workshop 47: send the skin picked in the main menu to the server.
+// The PNG is base64-encoded because the server strips control characters
+// from formspec field values, which would corrupt binary data. It is sent as
+// a field of a formspec submission with an empty formname, which the server
+// passes straight to on_player_receive_fields (also on unmodified servers).
+void Client::ws47SendSkin()
+{
+	std::string path;
+	if (!g_settings->getNoEx("ws47_skin_fullpath", path) || path.empty())
+		return;
+
+	std::string data;
+	if (!fs::ReadFile(path, data) || data.empty()) {
+		warningstream << "Skin upload: cannot read \"" << path << "\"" << std::endl;
+		return;
+	}
+	if (data.size() > 65536) {
+		warningstream << "Skin upload: file too large (" << data.size()
+			<< " bytes, max 65536)" << std::endl;
+		return;
+	}
+
+	StringMap fields;
+	fields["ws47_skin"] = base64_encode(data);
+	sendInventoryFields("", fields);
+	infostream << "Skin upload: sent " << data.size() << " bytes" << std::endl;
+}
+
 void Client::sendInventoryAction(InventoryAction *a)
 {
 	std::ostringstream os(std::ios_base::binary);
@@ -2015,6 +2055,7 @@ void Client::afterContentReceived()
 
 	m_state = LC_Ready;
 	sendReady();
+	m_ws47_skin_timer = 0.0f;
 
 	if (m_mods_loaded)
 		m_script->on_client_ready(m_env.getLocalPlayer());
