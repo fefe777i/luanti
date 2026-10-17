@@ -33,10 +33,10 @@ function ws47_theme.get_skin_path()
 end
 
 -- model[] element with the player model wearing the given (or chosen) skin.
--- Drag with the mouse/finger to rotate it.
+-- Drag with the mouse/finger to rotate it (unless no_mouse is set).
 -- If the mesh file is missing, a visible message is shown instead, and the
 -- paths are written to debug.txt to make problems easy to find.
-function ws47_theme.player_model(x, y, w, h, skin_path)
+function ws47_theme.player_model(x, y, w, h, skin_path, no_mouse)
 	local mesh_path = defaulttexturedir .. "character.b3d"
 	skin_path = skin_path or ws47_theme.get_skin_path()
 
@@ -57,6 +57,6 @@ function ws47_theme.player_model(x, y, w, h, skin_path)
 		"model[", x, ",", y, ";", w, ",", h, ";ws47_player;",
 		core.formspec_escape(mesh_path), ";",
 		core.formspec_escape(skin_path),
-		";0,180;false;true;0,79;30]",
+		";0,180;false;", no_mouse and "false" or "true", ";0,79;30]",
 	})
 end

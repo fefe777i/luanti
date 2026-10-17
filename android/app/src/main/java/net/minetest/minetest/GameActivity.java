@@ -43,6 +43,11 @@ import android.content.res.Configuration;
 import android.provider.DocumentsContract;
 import android.database.Cursor;
 import android.provider.OpenableColumns;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.graphics.Canvas;
+import android.graphics.Paint;
+import android.graphics.Rect;
 
 import androidx.annotation.Keep;
 import androidx.appcompat.app.AlertDialog;
@@ -382,6 +387,47 @@ public class GameActivity extends SDLActivity {
         }
     }
 
+    // Draws a region of the skin (given in 64x64 units, scaled by s) onto
+    // another place of the output, blending the transparent pixels.
+    private static void skinOverlay(Canvas c, Bitmap src, int s, Paint p,
+            int sx, int sy, int w, int h, int dx, int dy) {
+        c.drawBitmap(src,
+                new Rect(sx * s, sy * s, (sx + w) * s, (sy + h) * s),
+                new Rect(dx * s, dy * s, (dx + w) * s, (dy + h) * s), p);
+    }
+
+    // Luanti skins are 64x32 or 128x64. Minecraft skins (64x64 or 128x128)
+    // are converted: the outer layers (hat, jacket, sleeve, trouser) are
+    // drawn over the base layers and the unused lower half is cut off.
+    // Returns null for unsupported sizes.
+    private static Bitmap convertSkin(Bitmap src) {
+        int w = src.getWidth();
+        int h = src.getHeight();
+        if ((w == 64 && h == 32) || (w == 128 && h == 64)) {
+            return src;
+        }
+        if ((w == 64 && h == 64) || (w == 128 && h == 128)) {
+            int s = w / 64;
+            Bitmap out = Bitmap.createBitmap(w, w / 2, Bitmap.Config.ARGB_8888);
+            Canvas c = new Canvas(out);
+            Paint p = new Paint();
+            p.setFilterBitmap(false);
+            p.setAntiAlias(false);
+            Rect top = new Rect(0, 0, w, w / 2);
+            c.drawBitmap(src, top, top, p);
+            skinOverlay(c, src, s, p, 32, 0, 32, 16, 0, 0);    // hat -> head
+            skinOverlay(c, src, s, p, 16, 32, 24, 16, 16, 16); // jacket -> body
+            skinOverlay(c, src, s, p, 0, 32, 16, 16, 0, 16);   // trouser -> leg
+            skinOverlay(c, src, s, p, 40, 32, 16, 16, 40, 16); // sleeve -> arm
+            return out;
+        }
+        return null;
+    }
+
+    private void skinToast(final String text) {
+        runOnUiThread(() -> Toast.makeText(this, text, Toast.LENGTH_LONG).show());
+    }
+
     private String copyFileToSkins(Uri uri) {
         try {
             String name = "skin.png";
@@ -391,21 +437,53 @@ public class GameActivity extends SDLActivity {
                 if (idx >= 0) name = cursor.getString(idx);
                 cursor.close();
             }
+            // keep the file name safe for formspecs and the server
+            name = name.replaceAll("[^A-Za-z0-9._-]", "_");
+            if (!name.toLowerCase(Locale.ROOT).endsWith(".png")) {
+                int dot = name.lastIndexOf('.');
+                if (dot > 0) name = name.substring(0, dot);
+                name += ".png";
+            }
+
+            Bitmap src;
+            java.io.InputStream in = getContentResolver().openInputStream(uri);
+            try {
+                BitmapFactory.Options o = new BitmapFactory.Options();
+                o.inScaled = false;
+                o.inPreferredConfig = Bitmap.Config.ARGB_8888;
+                src = BitmapFactory.decodeStream(in, null, o);
+            } finally {
+                if (in != null) in.close();
+            }
+            if (src == null) {
+                skinToast("This file is not a valid image");
+                return "";
+            }
+            Bitmap result = convertSkin(src);
+            if (result == null) {
+                skinToast("Unsupported skin size " + src.getWidth() + "x"
+                        + src.getHeight()
+                        + " (use 64x32, 128x64, 64x64 or 128x128)");
+                return "";
+            }
+
             java.io.File skinsDir = new java.io.File(getUserDataPath(), "textures/base/pack/skins");
             if (!skinsDir.exists()) skinsDir.mkdirs();
             java.io.File outFile = new java.io.File(skinsDir, name);
-            java.io.InputStream in = getContentResolver().openInputStream(uri);
             java.io.FileOutputStream out = new java.io.FileOutputStream(outFile);
-            byte[] buf = new byte[4096];
-            int len;
-            while ((len = in.read(buf)) > 0) out.write(buf, 0, len);
-            in.close();
-            out.close();
+            try {
+                result.compress(Bitmap.CompressFormat.PNG, 100, out);
+            } finally {
+                out.close();
+            }
             final String finalName = name;
-            runOnUiThread(() -> Toast.makeText(this, "Skin saved: " + finalName, Toast.LENGTH_SHORT).show());
+            final boolean converted = result != src;
+            skinToast("Skin saved: " + finalName
+                    + (converted ? " (converted from Minecraft format)" : ""));
             return name;
         } catch (Exception e) {
             Log.e("GameActivity", "Failed to copy skin: " + e.getMessage());
+            skinToast("Failed to import skin");
             return "";
         }
     }
