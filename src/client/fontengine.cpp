@@ -32,7 +32,7 @@ static const char *settings[] = {
 	"font_path", "font_path_bold", "font_path_italic", "font_path_bold_italic",
 	"mono_font_path", "mono_font_path_bold", "mono_font_path_italic",
 	"mono_font_path_bold_italic",
-	"fallback_font_path",
+	"fallback_font_path", "emoji_font_path",
 	"dpi_change_notifier", "display_density_factor", "gui_scaling",
 };
 
@@ -83,8 +83,8 @@ gui::IGUIFont *FontEngine::getFont(FontSpec spec, bool may_fail)
 {
 	if (spec.mode == FM_Unspecified) {
 		spec.mode = s_default_font_mode;
-	} else if (spec.mode == _FM_Fallback) {
-		// Fallback font doesn't support these
+	} else if (spec.mode == _FM_Fallback || spec.mode == _FM_Emoji) {
+		// Fallback fonts don't support these
 		spec.bold = false;
 		spec.italic = false;
 	}
@@ -153,6 +153,7 @@ void FontEngine::readSettings()
 {
 	m_default_size[FM_Standard]  = rangelim(g_settings->getU16("font_size"), 5, 72);
 	m_default_size[_FM_Fallback] = m_default_size[FM_Standard];
+	m_default_size[_FM_Emoji]    = m_default_size[FM_Standard];
 	m_default_size[FM_Mono]      = rangelim(g_settings->getU16("mono_font_size"), 5, 72);
 
 	m_default_bold = g_settings->getBool("font_bold");
@@ -242,7 +243,8 @@ gui::IGUIFont *FontEngine::initFont(FontSpec spec)
 	assert(spec.mode != FM_Unspecified);
 	assert(spec.size != FONT_SIZE_UNSPECIFIED);
 
-	if (spec.mode == _FM_Fallback)
+	const bool is_fallback = spec.mode == _FM_Fallback || spec.mode == _FM_Emoji;
+	if (is_fallback)
 		spec.allow_server_media = false;
 
 	std::string setting_prefix = "";
@@ -275,16 +277,23 @@ gui::IGUIFont *FontEngine::initFont(FontSpec spec)
 
 	auto createFont = [&](gui::SGUITTFace *face) -> gui::CGUITTFont* {
 		auto *font = gui::CGUITTFont::createTTFont(m_env,
-				face, size, true, spec.mode != _FM_Fallback, font_shadow,
+				face, size, true, !is_fallback, font_shadow,
 				font_shadow_alpha);
 
 		if (!font)
 			return nullptr;
 
-		if (spec.mode != _FM_Fallback) {
-			FontSpec spec2(spec);
-			spec2.mode = _FM_Fallback;
-			font->setFallback(getFont(spec2, true));
+		// Fallback chain: requested font -> emoji font -> fallback font
+		FontSpec spec_fallback(spec);
+		spec_fallback.mode = _FM_Fallback;
+		if (spec.mode == _FM_Emoji) {
+			font->setFallback(getFont(spec_fallback, true));
+		} else if (spec.mode != _FM_Fallback) {
+			FontSpec spec_emoji(spec);
+			spec_emoji.mode = _FM_Emoji;
+			gui::IGUIFont *emoji_font = getFont(spec_emoji, true);
+			// without an emoji font, go straight to the fallback font
+			font->setFallback(emoji_font ? emoji_font : getFont(spec_fallback, true));
 		}
 
 		return font;
@@ -312,8 +321,14 @@ gui::IGUIFont *FontEngine::initFont(FontSpec spec)
 	std::string path_setting;
 	if (spec.mode == _FM_Fallback)
 		path_setting = "fallback_font_path";
+	else if (spec.mode == _FM_Emoji)
+		path_setting = "emoji_font_path";
 	else
 		path_setting = setting_prefix + "font_path" + setting_suffix;
+
+	// An empty path disables the emoji font
+	if (spec.mode == _FM_Emoji && g_settings->get(path_setting).empty())
+		return nullptr;
 
 	std::string fallback_settings[] = {
 		g_settings->get(path_setting),

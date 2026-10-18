@@ -2202,6 +2202,11 @@ mono_font_path_bold_italic (Bold and italic monospace font path) filepath fonts/
 #    This font will be used for certain languages or if the default font is unavailable.
 fallback_font_path (Fallback font path) filepath fonts/DroidSansFallbackFull.ttf
 
+#    Path of the color emoji font. Must be a TrueType font with color bitmaps
+#    (like Noto Color Emoji). It is used to draw emoji that are not present in the
+#    regular font. Leave empty to disable emoji.
+emoji_font_path (Emoji font path) filepath fonts/NotoColorEmoji.ttf
+
 [**Lighting] [client]
 
 #    Gradient of light curve at minimum light level.

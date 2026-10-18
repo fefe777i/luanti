@@ -65,7 +65,8 @@ namespace gui
 			glyph_page(0),
 			source_rect(),
 			offset(),
-			advance()
+			advance(),
+			is_color(false)
 		{}
 		~SGUITTGlyph() { unload(); }
 
@@ -75,7 +76,9 @@ namespace gui
 		}
 
 		//! Preload the glyph.
-		void preload(u32 char_index, FT_Face face, CGUITTFont *parent, u32 font_size, const FT_Int32 loadFlags);
+		//! \param slot_size Size of one (square) slot of the glyph page
+		//! \return false if the glyph could not be loaded
+		bool preload(u32 char_index, FT_Face face, CGUITTFont *parent, u32 slot_size, const FT_Int32 loadFlags);
 
 		//! Unloads the glyph.
 		void unload();
@@ -94,6 +97,12 @@ namespace gui
 
 		//! Glyph advance information.
 		core::vector2di advance;
+
+		//! True for color bitmap glyphs (emoji). These are drawn untinted.
+		bool is_color;
+
+		//! Set if loading the glyph failed, so we don't retry (and warn) all the time.
+		bool load_failed = false;
 	};
 
 	// Manages the FT_Face cache.
@@ -190,6 +199,13 @@ namespace gui
 			//! Returns the distance between letters
 			virtual core::vector2di getKerning(const wchar_t thisLetter, const wchar_t previousLetter) const override;
 
+			//! Selects the size of the face that is used for loading glyphs.
+			//! (FreeType faces are shared, so this has to be repeated before loading.)
+			void applyFaceSize() const;
+
+			//! Factor by which bitmaps of a color bitmap font (emoji) are scaled.
+			float getColorBitmapScale() const { return color_bitmap_scale; }
+
 			//! Define which characters should not be drawn by the font.
 			virtual void setInvisibleCharacters(const wchar_t *s) override;
 
@@ -236,6 +252,8 @@ namespace gui
 			{
 				// Set up our loading flags.
 				load_flags = FT_LOAD_DEFAULT | FT_LOAD_RENDER;
+				if (color_bitmap_face)
+					load_flags |= FT_LOAD_COLOR;
 				if (!useHinting())
 					load_flags |= FT_LOAD_NO_HINTING;
 				if (!useAutoHinting())
@@ -259,7 +277,16 @@ namespace gui
 			irr_ptr<SGUITTFace> m_face;
 			FT_Face tt_face;
 			FT_Size_Metrics font_metrics;
-			FT_Int32 load_flags;
+			FT_Int32 load_flags = 0;
+
+			// Set for fixed-size color bitmap fonts (e.g. Noto Color Emoji).
+			// Their glyphs can't be scaled by FreeType, so we select the closest
+			// strike and scale the bitmaps ourselves.
+			bool color_bitmap_face = false;
+			FT_Int color_strike_index = 0;
+			float color_bitmap_scale = 1.0f;
+			// Edge length of a slot in glyph pages (== size for normal fonts)
+			u32 slot_size = 0;
 
 			mutable core::array<CGUITTGlyphPage*> Glyph_Pages;
 			mutable core::array<SGUITTGlyph> Glyphs;

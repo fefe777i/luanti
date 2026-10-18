@@ -35,6 +35,10 @@ enum FontMode : u8 {
 	/// in the originally requested font (setting "fallback_font_path")
 	_FM_Fallback,
 
+	/// Use only in `FontEngine`. Color emoji font (setting "emoji_font_path"),
+	/// used for glyphs that are not present in the originally requested font.
+	_FM_Emoji,
+
 	/// Sum of all font modes
 	FM_MaxMode,
 

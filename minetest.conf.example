@@ -3333,6 +3333,12 @@
 #    type: filepath
 # fallback_font_path = fonts/DroidSansFallbackFull.ttf
 
+#    Path of the color emoji font. Must be a TrueType font with color bitmaps
+#    (like Noto Color Emoji). It is used to draw emoji that are not present in the
+#    regular font. Leave empty to disable emoji.
+#    type: filepath
+# emoji_font_path = fonts/NotoColorEmoji.ttf
+
 ### Lighting
 
 #    Gradient of light curve at minimum light level.

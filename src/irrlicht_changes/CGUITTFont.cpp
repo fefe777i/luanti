@@ -42,12 +42,45 @@
 #include "IImage.h"
 #include "IVideoDriver.h"
 
+#include <algorithm>
+#include <cmath>
 #include <cstdlib>
+#include <cwchar>
 #include <iostream>
 
 
 namespace gui
 {
+
+namespace
+{
+	// Color bitmap fonts (emoji) are drawn slightly smaller than their nominal
+	// size so that they fit into the line height of the text.
+	constexpr float COLOR_BITMAP_SIZE_FACTOR = 0.9f;
+
+	//! Characters that are part of emoji sequences but have no visual
+	//! representation on their own (we do no text shaping):
+	//! variation selectors, zero width (non-)joiners and tag characters.
+	inline bool isZeroWidthEmojiControl(char32_t c)
+	{
+		return (c >= 0xFE00 && c <= 0xFE0F) || c == 0x200B || c == 0x200C ||
+			c == 0x200D || c == 0x2060 || (c >= 0xE0020 && c <= 0xE007F);
+	}
+
+	//! Converts a single code point to a wide string (surrogate pairs if needed)
+	core::stringw charToWideString(char32_t c)
+	{
+		core::stringw s;
+		if (sizeof(wchar_t) == 2 && c > 0xFFFF) {
+			c -= 0x10000;
+			s += (wchar_t)(0xD800 + (c >> 10));
+			s += (wchar_t)(0xDC00 + (c & 0x3FF));
+		} else {
+			s += (wchar_t)c;
+		}
+		return s;
+	}
+}
 
 FT_Library SGUITTFace::freetype_library = nullptr;
 size_t SGUITTFace::n_faces = 0;
@@ -303,6 +336,67 @@ video::IImage* SGUITTGlyph::createGlyphImage(const FT_Bitmap& bits, video::IVide
 			}
 			break;
 		}
+		case FT_PIXEL_MODE_BGRA:
+		{
+			// Color bitmap (premultiplied alpha, BGRA byte order).
+			// It is scaled down to the rectangle reserved in preload() with a box filter.
+			const u32 dst_w = source_rect.getWidth();
+			const u32 dst_h = source_rect.getHeight();
+			if (dst_w == 0 || dst_h == 0 || bits.width == 0 || bits.rows == 0)
+				return nullptr;
+
+			core::dimension2du dd(dst_w + 1, dst_h + 1);
+			texture_size = dd.getOptimalSize(!driver->queryFeature(video::EVDF_TEXTURE_NPOT), !driver->queryFeature(video::EVDF_TEXTURE_NSQUARE), true, 0);
+			image = driver->createImage(video::ECF_A8R8G8B8, texture_size);
+			image->fill(video::SColor(0, 255, 255, 255));
+
+			const u32 image_pitch = image->getPitch() / sizeof(u32);
+			u32 *image_data = (u32*)image->getData();
+			const u8 *src = bits.buffer;
+			const s32 src_pitch = bits.pitch;
+			const float sx = (float)bits.width / dst_w;
+			const float sy = (float)bits.rows / dst_h;
+
+			for (u32 y = 0; y < dst_h; ++y) {
+				const float y0 = y * sy, y1 = (y + 1) * sy;
+				const u32 iy0 = (u32)y0;
+				const u32 iy1 = std::min<u32>((u32)std::ceil(y1), bits.rows);
+				for (u32 x = 0; x < dst_w; ++x) {
+					const float x0 = x * sx, x1 = (x + 1) * sx;
+					const u32 ix0 = (u32)x0;
+					const u32 ix1 = std::min<u32>((u32)std::ceil(x1), bits.width);
+
+					float sum_b = 0, sum_g = 0, sum_r = 0, sum_a = 0, sum_w = 0;
+					for (u32 iy = iy0; iy < iy1; ++iy) {
+						const float wy = std::min<float>(y1, iy + 1) - std::max<float>(y0, iy);
+						const u8 *row = src + (s32)iy * src_pitch;
+						for (u32 ix = ix0; ix < ix1; ++ix) {
+							const float wx = std::min<float>(x1, ix + 1) - std::max<float>(x0, ix);
+							const float w = wx * wy;
+							const u8 *px = row + ix * 4;
+							sum_b += w * px[0];
+							sum_g += w * px[1];
+							sum_r += w * px[2];
+							sum_a += w * px[3];
+							sum_w += w;
+						}
+					}
+					if (sum_w <= 0 || sum_a <= 0)
+						continue;
+
+					// Average in premultiplied space, then convert to straight alpha
+					// as expected by the blending of the video driver.
+					const float a = sum_a / sum_w;
+					const float inv = 255.0f / sum_a;
+					const u32 r = core::clamp<s32>(core::round32(sum_r * inv), 0, 255);
+					const u32 g = core::clamp<s32>(core::round32(sum_g * inv), 0, 255);
+					const u32 b = core::clamp<s32>(core::round32(sum_b * inv), 0, 255);
+					const u32 a8 = core::clamp<s32>(core::round32(a), 0, 255);
+					image_data[y * image_pitch + x] = video::SColor(a8, r, g, b).color;
+				}
+			}
+			break;
+		}
 		default:
 			errorstream << "CGUITTFont: unknown pixel mode " << (int)bits.pixel_mode << std::endl;
 			return 0;
@@ -310,25 +404,44 @@ video::IImage* SGUITTGlyph::createGlyphImage(const FT_Bitmap& bits, video::IVide
 	return image;
 }
 
-void SGUITTGlyph::preload(u32 char_index, FT_Face face, CGUITTFont *parent, u32 font_size, const FT_Int32 loadFlags)
+bool SGUITTGlyph::preload(u32 char_index, FT_Face face, CGUITTFont *parent, u32 slot_size, const FT_Int32 loadFlags)
 {
 	// Set the size of the glyph.
-	FT_Set_Pixel_Sizes(face, 0, font_size);
+	parent->applyFaceSize();
 
 	// Attempt to load the glyph.
 	auto err = FT_Load_Glyph(face, char_index, loadFlags);
 	if (err != FT_Err_Ok) {
 		warningstream << "SGUITTGlyph: failed to load glyph " << char_index
 			<< " with error: " << (int)err << std::endl;
-		return;
+		return false;
 	}
 
 	FT_GlyphSlot glyph = face->glyph;
 	const FT_Bitmap &bits = glyph->bitmap;
 
 	// Setup the glyph information here:
-	advance = core::vector2di(glyph->advance.x, glyph->advance.y);
-	offset = core::vector2di(glyph->bitmap_left, glyph->bitmap_top);
+	u32 width = bits.width, height = bits.rows;
+	is_color = bits.pixel_mode == FT_PIXEL_MODE_BGRA;
+	if (is_color) {
+		// Color bitmaps have a fixed size and are scaled down by us.
+		const float scale = parent->getColorBitmapScale();
+		// round the advance up to whole pixels so neighbouring glyphs don't overlap
+		advance = core::vector2di((std::lround(glyph->advance.x * scale) + 63) & ~63L,
+				std::lround(glyph->advance.y * scale));
+		offset = core::vector2di(std::lround(glyph->bitmap_left * scale),
+				std::lround(glyph->bitmap_top * scale));
+		if (width > 0)
+			width = std::max<u32>(1, std::lround(width * scale));
+		if (height > 0)
+			height = std::max<u32>(1, std::lround(height * scale));
+		// must fit into a slot (including the extra pixel of the glyph image)
+		width = std::min<u32>(width, slot_size - 1);
+		height = std::min<u32>(height, slot_size - 1);
+	} else {
+		advance = core::vector2di(glyph->advance.x, glyph->advance.y);
+		offset = core::vector2di(glyph->bitmap_left, glyph->bitmap_top);
+	}
 
 	// Try to get the last page with available slots.
 	CGUITTGlyphPage* page = parent->getLastGlyphPage();
@@ -338,30 +451,33 @@ void SGUITTGlyph::preload(u32 char_index, FT_Face face, CGUITTFont *parent, u32 
 	{
 		page = parent->createGlyphPage(bits.pixel_mode);
 		if (!page)
-			return;
+			return false;
 	}
 
 	// Allocate slot from page
 	glyph_page = parent->getLastGlyphPageIndex();
 	u32 texture_side_length = page->texture->getOriginalSize().Width;
 	core::vector2di page_position(
-		(page->used_slots % (texture_side_length / font_size)) * font_size,
-		(page->used_slots / (texture_side_length / font_size)) * font_size
+		(page->used_slots % (texture_side_length / slot_size)) * slot_size,
+		(page->used_slots / (texture_side_length / slot_size)) * slot_size
 	);
 	source_rect.UpperLeftCorner = page_position;
-	source_rect.LowerRightCorner = core::vector2di(page_position.X + bits.width, page_position.Y + bits.rows);
+	source_rect.LowerRightCorner = core::vector2di(page_position.X + width, page_position.Y + height);
 
 	++page->used_slots;
 	--page->available_slots;
 
 	// createGlyphImage can now be called, the next preload() call will however
 	// invalidate the data in `bits`.
+	return true;
 }
 
 void SGUITTGlyph::unload()
 {
 	// reset isLoaded to false
 	source_rect = core::recti();
+	is_color = false;
+	load_failed = false;
 }
 
 
@@ -418,10 +534,55 @@ bool CGUITTFont::load(SGUITTFace *face, const u32 size, const bool antialias,
 	// Store our face.
 	m_face.grab(face);
 	tt_face = face->face;
+	slot_size = size;
+
+	// Fixed-size color bitmap fonts (e.g. Noto Color Emoji) can't be scaled by
+	// FreeType: pick the best matching strike and scale the bitmaps ourselves.
+	color_bitmap_face = false;
+	if (FT_HAS_COLOR(tt_face) && !FT_IS_SCALABLE(tt_face) &&
+			FT_HAS_FIXED_SIZES(tt_face) && tt_face->num_fixed_sizes > 0) {
+		FT_Int best = -1;
+		for (FT_Int i = 0; i < tt_face->num_fixed_sizes; ++i) {
+			const float ppem = tt_face->available_sizes[i].y_ppem / 64.0f;
+			if (ppem <= 0)
+				continue;
+			if (best < 0) {
+				best = i;
+				continue;
+			}
+			const float best_ppem = tt_face->available_sizes[best].y_ppem / 64.0f;
+			// smallest strike that is not smaller than needed, else the largest
+			if ((best_ppem < size && ppem > best_ppem) ||
+					(ppem >= size && ppem < best_ppem))
+				best = i;
+		}
+		if (best >= 0) {
+			const FT_Bitmap_Size &bs = tt_face->available_sizes[best];
+			const float ppem = bs.y_ppem / 64.0f;
+			color_bitmap_face = true;
+			color_strike_index = best;
+			color_bitmap_scale = COLOR_BITMAP_SIZE_FACTOR * size / ppem;
+			slot_size = (u32)std::ceil(std::max<int>(bs.width, bs.height) *
+					color_bitmap_scale) + 2;
+			update_load_flags();
+		}
+	}
 
 	// Store font metrics.
-	FT_Set_Pixel_Sizes(tt_face, size, 0);
-	font_metrics = tt_face->size->metrics;
+	if (color_bitmap_face) {
+		FT_Select_Size(tt_face, color_strike_index);
+		font_metrics = tt_face->size->metrics;
+		// There are no usable outline metrics, so derive them from the size
+		// (similar to the ones of regular text fonts).
+		const FT_Pos asc = (FT_Pos)(size * 0.905f * 64);
+		const FT_Pos desc = (FT_Pos)(size * 0.212f * 64);
+		font_metrics.ascender = (asc + 63) & ~(FT_Pos)63;
+		font_metrics.descender = -((desc + 63) & ~(FT_Pos)63);
+		font_metrics.height = font_metrics.ascender - font_metrics.descender;
+	} else {
+		FT_Set_Pixel_Sizes(tt_face, size, 0);
+		font_metrics = tt_face->size->metrics;
+	}
 
 	verbosestream << tt_face->num_glyphs << " glyphs, ascender=" << font_metrics.ascender
 		<< " height=" << font_metrics.height << std::endl;
@@ -509,10 +670,10 @@ CGUITTGlyphPage* CGUITTFont::createGlyphPage(const u8 pixel_mode)
 	// We want to try to put at least 180 glyphs on a single texture.
 	// magic number = floor(texture_size / sqrt(180))
 	core::dimension2du page_texture_size;
-	if (size <= 19) page_texture_size = core::dimension2du(256, 256);
-	else if (size <= 38) page_texture_size = core::dimension2du(512, 512);
-	else if (size <= 76) page_texture_size = core::dimension2du(1024, 1024);
-	else if (size <= 152) page_texture_size = core::dimension2du(2048, 2048);
+	if (slot_size <= 19) page_texture_size = core::dimension2du(256, 256);
+	else if (slot_size <= 38) page_texture_size = core::dimension2du(512, 512);
+	else if (slot_size <= 76) page_texture_size = core::dimension2du(1024, 1024);
+	else if (slot_size <= 152) page_texture_size = core::dimension2du(2048, 2048);
 	else page_texture_size = core::dimension2du(4096, 4096);
 
 	if (page_texture_size.Width > max_texture_size.Width || page_texture_size.Height > max_texture_size.Height)
@@ -526,9 +687,18 @@ CGUITTGlyphPage* CGUITTFont::createGlyphPage(const u8 pixel_mode)
 	}
 
 	// Determine the number of glyph slots on the page and add it to the list of pages
-	page->available_slots = (page_texture_size.Width / size) * (page_texture_size.Height / size);
+	page->available_slots = (page_texture_size.Width / slot_size) * (page_texture_size.Height / slot_size);
 	Glyph_Pages.push_back(page);
 	return page;
+}
+
+void CGUITTFont::applyFaceSize() const
+{
+	// Faces are cached and shared, so the size may have been changed by someone else.
+	if (color_bitmap_face)
+		FT_Select_Size(tt_face, color_strike_index);
+	else
+		FT_Set_Pixel_Sizes(tt_face, 0, size);
 }
 
 void CGUITTFont::setFallback(gui::IGUIFont *font)
@@ -630,7 +800,8 @@ void CGUITTFont::draw(const EnrichedString &text, const core::rect<s32>& positio
 		const u32 width = getWidthFromCharacter(currentChar);
 
 		// Skip whitespace characters
-		if (InvisibleChars.find(currentChar) != std::u32string::npos)
+		if (InvisibleChars.find(currentChar) != std::u32string::npos ||
+				isZeroWidthEmojiControl(currentChar))
 			goto skip_invisible;
 
 		if (clip) {
@@ -663,17 +834,23 @@ void CGUITTFont::draw(const EnrichedString &text, const core::rect<s32>& positio
 			CGUITTGlyphPage *const page = Glyph_Pages[glyph->glyph_page];
 			page->render_positions.emplace_back(offset.X + offx, offset.Y + offy);
 			page->render_source_rects.push_back(glyph->source_rect);
-			page->render_colors.push_back(i < colors.size() ? colors[i] : fallback_color);
+			video::SColor glyph_color = i < colors.size() ? colors[i] : fallback_color;
+			if (glyph->is_color) {
+				// color glyphs (emoji) are not tinted, but keep the transparency
+				glyph_color = video::SColor(glyph_color.getAlpha(), 255, 255, 255);
+			}
+			page->render_colors.push_back(glyph_color);
 		}
 		else if (fallback)
 		{
 			// Let the fallback font draw it, this isn't super efficient but hopefully that doesn't matter
-			wchar_t l1[] = { (wchar_t) currentChar, 0 };
+			const core::stringw l1 = charToWideString(currentChar);
 
 			// Apply kerning.
-			offset += fallback->getKerning(*l1, (wchar_t) previousChar);
+			if (currentChar <= WCHAR_MAX && previousChar <= WCHAR_MAX)
+				offset += fallback->getKerning((wchar_t) currentChar, (wchar_t) previousChar);
 
-			fallback->draw(core::stringw(l1),
+			fallback->draw(l1,
 				core::rect<s32>({offset.X-1, offset.Y-1}, position.LowerRightCorner), // ???
 				i < colors.size() ? colors[i] : fallback_color,
 				false, false, clip);
@@ -789,6 +966,9 @@ core::dimension2d<u32> CGUITTFont::getDimension(const std::u32string& utext) con
 
 inline u32 CGUITTFont::getWidthFromCharacter(char32_t c) const
 {
+	if (isZeroWidthEmojiControl(c))
+		return 0;
+
 	u32 n = getGlyphIndexByChar(c);
 	if (n > 0)
 	{
@@ -797,8 +977,7 @@ inline u32 CGUITTFont::getWidthFromCharacter(char32_t c) const
 	}
 	if (fallback)
 	{
-		wchar_t s[] = { (wchar_t) c, 0 };
-		return fallback->getDimension(s).Width;
+		return fallback->getDimension(charToWideString(c).c_str()).Width;
 	}
 
 	if (c >= 0x2000)
@@ -808,6 +987,9 @@ inline u32 CGUITTFont::getWidthFromCharacter(char32_t c) const
 
 inline u32 CGUITTFont::getHeightFromCharacter(char32_t c) const
 {
+	if (isZeroWidthEmojiControl(c))
+		return 0;
+
 	u32 n = getGlyphIndexByChar(c);
 	if (n > 0)
 	{
@@ -817,8 +999,7 @@ inline u32 CGUITTFont::getHeightFromCharacter(char32_t c) const
 	}
 	if (fallback)
 	{
-		wchar_t s[] = { (wchar_t) c, 0 };
-		return fallback->getDimension(s).Height;
+		return fallback->getDimension(charToWideString(c).c_str()).Height;
 	}
 
 	if (c >= 0x2000)
@@ -833,6 +1014,10 @@ u32 CGUITTFont::getGlyphIndexByChar(char32_t c) const
 
 	// Check for a valid glyph.
 	if (glyph == 0)
+		return 0;
+
+	// If loading failed before, don't try again (let the fallback handle it).
+	if (Glyphs[glyph - 1].load_failed)
 		return 0;
 
 	// If our glyph is already loaded, don't bother doing any batch loading code.
@@ -859,7 +1044,10 @@ u32 CGUITTFont::getGlyphIndexByChar(char32_t c) const
 			if (!glyph.isLoaded())
 			{
 				auto *this2 = const_cast<CGUITTFont*>(this); // oh well
-				glyph.preload(char_index, tt_face, this2, size, load_flags);
+				if (!glyph.preload(char_index, tt_face, this2, slot_size, load_flags)) {
+					glyph.load_failed = true;
+					continue;
+				}
 				auto *surface = glyph.createGlyphImage(tt_face->glyph->bitmap, Driver);
 				Glyph_Pages[glyph.glyph_page]->pushGlyphToBePaged(&glyph, surface);
 			}
@@ -868,6 +1056,8 @@ u32 CGUITTFont::getGlyphIndexByChar(char32_t c) const
 	while (++start_pos < end_pos);
 
 	// Return our original character.
+	if (Glyphs[glyph - 1].load_failed)
+		return 0;
 	return glyph;
 }
 
@@ -925,7 +1115,7 @@ core::vector2di CGUITTFont::getKerning(const char32_t thisLetter, const char32_t
 
 	// Set the size of the face.
 	// This is because we cache faces and the face may have been set to a different size.
-	FT_Set_Pixel_Sizes(tt_face, 0, size);
+	applyFaceSize();
 
 	core::vector2di ret(GlobalKerningWidth, GlobalKerningHeight);
 
@@ -934,7 +1124,7 @@ core::vector2di CGUITTFont::getKerning(const char32_t thisLetter, const char32_t
 	// If we don't have this glyph, ask fallback font
 	if (n == 0)
 	{
-		if (fallback)
+		if (fallback && thisLetter <= WCHAR_MAX && previousLetter <= WCHAR_MAX)
 			ret = fallback->getKerning((wchar_t) thisLetter, (wchar_t) previousLetter);
 		return ret;
 	}
