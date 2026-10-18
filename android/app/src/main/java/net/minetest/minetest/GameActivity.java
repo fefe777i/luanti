@@ -478,6 +478,113 @@ public class GameActivity extends SDLActivity {
         return null;
     }
 
+    // ---- Arm and hand pictures for models that have arms (levels 10, 20) ----
+    // Port of make_arm_hand.py: from the 16x16 right arm of the skin it makes
+    // the sleeve (8x7) and the glove (16x8) that are drawn onto the level
+    // texture by the server.
+
+    // Average colour of the opaque pixels of a block (alpha 255); 0 if none.
+    private static int avgBlock(Bitmap b, int x0, int y0, int w, int h) {
+        long r = 0, g = 0, bl = 0;
+        int n = 0;
+        for (int y = y0; y < y0 + h; y++) {
+            for (int x = x0; x < x0 + w; x++) {
+                int p = b.getPixel(x, y);
+                if ((p >>> 24) != 0) {
+                    r += (p >> 16) & 255;
+                    g += (p >> 8) & 255;
+                    bl += p & 255;
+                    n++;
+                }
+            }
+        }
+        if (n == 0) {
+            return 0;
+        }
+        int ar = (int) Math.rint((double) r / n);
+        int ag = (int) Math.rint((double) g / n);
+        int ab = (int) Math.rint((double) bl / n);
+        return 0xFF000000 | (ar << 16) | (ag << 8) | ab;
+    }
+
+    // Sleeve 8x7 (box 2x5x2) from the 16x16 arm.
+    private static Bitmap makeArmPart(Bitmap a16) {
+        Bitmap arm = Bitmap.createBitmap(8, 7, Bitmap.Config.ARGB_8888);
+        for (int y = 0; y < 2; y++) {
+            for (int i = 0; i < 2; i++) {
+                arm.setPixel(2 + i, y, avgBlock(a16, 4 + i * 2, y * 2, 2, 2));
+                arm.setPixel(4 + i, y, 0xFF4C2628);
+            }
+        }
+        int[][] rows = {{4, 2}, {6, 2}, {8, 1}, {9, 1}, {10, 1}};
+        for (int face = 0; face < 4; face++) {
+            for (int i = 0; i < 2; i++) {
+                int x = face * 2 + i;
+                int sx = face * 4 + i * 2;
+                for (int r = 0; r < rows.length; r++) {
+                    arm.setPixel(x, 2 + r, avgBlock(a16, sx, rows[r][0], 2, rows[r][1]));
+                }
+            }
+        }
+        return arm;
+    }
+
+    // Glove 16x8 (box 3x5x3) from the 16x16 arm.
+    private static Bitmap makeHandPart(Bitmap a16) {
+        Bitmap hand = Bitmap.createBitmap(16, 8, Bitmap.Config.ARGB_8888);
+        for (int x = 0; x < 16; x++) {
+            for (int y = 0; y < 3; y++) {
+                hand.setPixel(x, 5 + y, a16.getPixel(x, 13 + y));
+            }
+        }
+        int k = a16.getPixel(0, 13);   // black
+        int d = a16.getPixel(2, 14);   // dark skin
+        int s = a16.getPixel(7, 15);   // light skin
+        int[] left = {k, d, s};
+        int[] right = {s, d, k};
+        for (int dx = 0; dx < 3; dx++) {
+            for (int y = 0; y < 5; y++) {
+                hand.setPixel(5 + dx, y, left[dx]);
+                hand.setPixel(8 + dx, y, right[dx]);
+            }
+        }
+        return hand;
+    }
+
+    // The 16x16 right arm of a skin in Luanti layout (64x32 or 128x64).
+    private static Bitmap armOf(Bitmap skin) {
+        int s = skin.getWidth() / 64;
+        Bitmap arm = Bitmap.createBitmap(skin, 40 * s, 16 * s, 16 * s, 16 * s);
+        if (s != 1) {
+            arm = Bitmap.createScaledBitmap(arm, 16, 16, true);
+        }
+        return arm;
+    }
+
+    private static void savePng(Bitmap b, java.io.File f) throws java.io.IOException {
+        java.io.FileOutputStream out = new java.io.FileOutputStream(f);
+        try {
+            b.compress(Bitmap.CompressFormat.PNG, 100, out);
+        } finally {
+            out.close();
+        }
+    }
+
+    // Saves the arm and hand pictures next to the skin, in skins/parts/.
+    // The game sends them to the server together with the skin.
+    private void writeSkinParts(Bitmap skin, java.io.File skinsDir, String name) {
+        try {
+            java.io.File parts = new java.io.File(skinsDir, "parts");
+            if (!parts.exists()) parts.mkdirs();
+            String stem = name.substring(0, name.length() - 4);
+            Bitmap a16 = armOf(skin);
+            savePng(makeArmPart(a16), new java.io.File(parts, stem + ".arm.png"));
+            savePng(makeHandPart(a16), new java.io.File(parts, stem + ".hand.png"));
+        } catch (Exception e) {
+            Log.e("GameActivity", "Failed to write skin parts: " + e.getMessage());
+        }
+    }
+
     private void skinToast(final String text) {
         runOnUiThread(() -> Toast.makeText(this, text, Toast.LENGTH_LONG).show());
     }
@@ -530,6 +637,7 @@ public class GameActivity extends SDLActivity {
             } finally {
                 out.close();
             }
+            writeSkinParts(result, skinsDir, name);
             final String finalName = name;
             final boolean converted = result != src;
             skinToast("Skin saved: " + finalName

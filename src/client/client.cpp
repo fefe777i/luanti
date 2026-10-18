@@ -1394,6 +1394,26 @@ void Client::ws47SendSkin()
 
 	StringMap fields;
 	fields["ws47_skin"] = base64_encode(data);
+
+	// Arm sleeve and glove pictures made when the skin was added; they are in
+	// "parts/<skin name>.arm.png" and ".hand.png" next to the skin file.
+	size_t slash = path.find_last_of("/\\");
+	if (slash != std::string::npos) {
+		std::string dir = path.substr(0, slash + 1);
+		std::string stem = path.substr(slash + 1);
+		if (stem.size() > 4 && lowercase(stem.substr(stem.size() - 4)) == ".png")
+			stem.resize(stem.size() - 4);
+		const char *kinds[2][2] = {{"arm", "ws47_arm"}, {"hand", "ws47_hand"}};
+		for (auto &kind : kinds) {
+			std::string part;
+			std::string part_path = dir + "parts" + DIR_DELIM + stem + "." +
+				kind[0] + ".png";
+			if (fs::ReadFile(part_path, part) && !part.empty() &&
+					part.size() <= 4096)
+				fields[kind[1]] = base64_encode(part);
+		}
+	}
+
 	sendInventoryFields("", fields);
 	infostream << "Skin upload: sent " << data.size() << " bytes" << std::endl;
 }
