@@ -36,6 +36,8 @@
 #include <ft2build.h>
 #include <freetype/freetype.h>
 
+#include <vector>
+
 #include "irr_ptr.h"
 #include "IGUIFont.h"
 #include "irrArray.h"
@@ -43,6 +45,10 @@
 
 namespace gui {
 	class IGUIEnvironment;
+}
+
+namespace io {
+	class IFileSystem;
 }
 
 namespace video {
@@ -203,6 +209,21 @@ namespace gui
 			//! (FreeType faces are shared, so this has to be repeated before loading.)
 			void applyFaceSize() const;
 
+			//! True if this is a fixed-size color bitmap font (emoji).
+			bool isColorBitmapFont() const { return color_bitmap_face; }
+
+			//! Fallback for FreeType builds without PNG support: reads the color glyph
+			//! directly from the CBDT/CBLC tables and decodes the PNG with the engine.
+			//! On success getLoadedBitmap() returns the decoded (premultiplied BGRA) bitmap.
+			bool decodeColorGlyph(FT_UInt glyph_index, int &left, int &top, long &advance_26_6);
+			void resetDecodedGlyph() { use_decoded_bitmap = false; }
+
+			//! Bitmap of the glyph that was loaded last
+			const FT_Bitmap &getLoadedBitmap() const
+			{
+				return use_decoded_bitmap ? decoded_bitmap : tt_face->glyph->bitmap;
+			}
+
 			//! Factor by which bitmaps of a color bitmap font (emoji) are scaled.
 			float getColorBitmapScale() const { return color_bitmap_scale; }
 
@@ -274,6 +295,14 @@ namespace gui
 			core::vector2di getKerning(const char32_t thisLetter, const char32_t previousLetter) const;
 
 			video::IVideoDriver* Driver = nullptr;
+			io::IFileSystem *FileSystem = nullptr;
+
+			// for decodeColorGlyph()
+			std::vector<unsigned char> cblc_table;
+			bool cblc_loaded = false;
+			std::vector<unsigned char> decoded_data;
+			FT_Bitmap decoded_bitmap = {};
+			bool use_decoded_bitmap = false;
 			irr_ptr<SGUITTFace> m_face;
 			FT_Face tt_face;
 			FT_Size_Metrics font_metrics;

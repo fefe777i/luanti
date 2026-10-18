@@ -42,8 +42,14 @@
 #include "IImage.h"
 #include "IVideoDriver.h"
 
+#include <freetype/tttables.h>
+
+#include "IFileSystem.h"
+#include "IReadFile.h"
+
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <cstdlib>
 #include <cwchar>
 #include <iostream>
@@ -66,6 +72,118 @@ namespace
 		return (c >= 0xFE00 && c <= 0xFE0F) || c == 0x200B || c == 0x200C ||
 			c == 0x200D || c == 0x2060 || (c >= 0xE0020 && c <= 0xE007F);
 	}
+
+// BEGIN CBDT PARSE
+	//! Reads a color glyph from the CBLC/CBDT tables (image formats 17 and 18,
+	//! index subtable formats 1 and 3). Doesn't need PNG support in FreeType.
+	struct CBDTGlyph {
+		std::vector<uint8_t> png;
+		int left = 0, top = 0;
+		long advance = 0; // in pixels
+	};
+
+	inline uint32_t rd16(const uint8_t *p) { return (uint32_t(p[0]) << 8) | p[1]; }
+	inline uint32_t rd32(const uint8_t *p) { return (rd16(p) << 16) | rd16(p + 2); }
+
+	bool loadCBDTGlyph(FT_Face face, int ppem_y, uint32_t gi,
+			std::vector<uint8_t> &cblc, bool &cblc_loaded, CBDTGlyph &out)
+	{
+		const FT_ULong tag_cblc = FT_MAKE_TAG('C', 'B', 'L', 'C');
+		const FT_ULong tag_cbdt = FT_MAKE_TAG('C', 'B', 'D', 'T');
+		if (!cblc_loaded) {
+			cblc_loaded = true;
+			FT_ULong len = 0;
+			if (FT_Load_Sfnt_Table(face, tag_cblc, 0, nullptr, &len) == 0 && len > 8) {
+				cblc.resize(len);
+				if (FT_Load_Sfnt_Table(face, tag_cblc, 0, cblc.data(), &len) != 0)
+					cblc.clear();
+			}
+		}
+		const size_t n = cblc.size();
+		const uint8_t *c = cblc.data();
+		if (n < 8)
+			return false;
+
+		const uint32_t num_sizes = rd32(c + 4);
+		for (uint32_t i = 0; i < num_sizes; ++i) {
+			const size_t rec = 8 + (size_t)i * 48;
+			if (rec + 48 > n)
+				return false;
+			const uint8_t *r = c + rec;
+			if ((int)r[45] != ppem_y)
+				continue;
+			if (gi < rd16(r + 40) || gi > rd16(r + 42))
+				continue;
+
+			const uint32_t array_off = rd32(r);
+			const uint32_t num_sub = rd32(r + 8);
+			for (uint32_t k = 0; k < num_sub; ++k) {
+				const size_t e = (size_t)array_off + 8 * (size_t)k;
+				if (e + 8 > n)
+					return false;
+				const uint32_t first = rd16(c + e), last = rd16(c + e + 2);
+				if (gi < first || gi > last)
+					continue;
+
+				const size_t sub = (size_t)array_off + rd32(c + e + 4);
+				if (sub + 8 > n)
+					return false;
+				const uint32_t index_format = rd16(c + sub);
+				const uint32_t image_format = rd16(c + sub + 2);
+				const uint32_t data_off = rd32(c + sub + 4);
+				const size_t idx = gi - first;
+
+				uint32_t o0, o1;
+				if (index_format == 1) {
+					if (sub + 8 + 4 * (idx + 2) > n)
+						return false;
+					o0 = rd32(c + sub + 8 + 4 * idx);
+					o1 = rd32(c + sub + 8 + 4 * (idx + 1));
+				} else if (index_format == 3) {
+					if (sub + 8 + 2 * (idx + 2) > n)
+						return false;
+					o0 = rd16(c + sub + 8 + 2 * idx);
+					o1 = rd16(c + sub + 8 + 2 * (idx + 1));
+				} else {
+					return false;
+				}
+				if (o1 <= o0 || o1 - o0 > (1u << 24))
+					return false; // empty or insane
+
+				std::vector<uint8_t> buf(o1 - o0);
+				FT_ULong len = buf.size();
+				if (FT_Load_Sfnt_Table(face, tag_cbdt, (FT_Long)(data_off + o0), buf.data(), &len) != 0
+						|| len != buf.size())
+					return false;
+
+				size_t png_off;
+				if (image_format == 17) { // small metrics + data length
+					if (buf.size() < 9)
+						return false;
+					out.left = (int8_t)buf[2];
+					out.top = (int8_t)buf[3];
+					out.advance = buf[4];
+					png_off = 9;
+				} else if (image_format == 18) { // big metrics + data length
+					if (buf.size() < 12)
+						return false;
+					out.left = (int8_t)buf[2];
+					out.top = (int8_t)buf[3];
+					out.advance = buf[4];
+					png_off = 12;
+				} else {
+					return false;
+				}
+				const uint32_t png_len = rd32(buf.data() + png_off - 4);
+				if (png_len == 0 || png_off + png_len > buf.size())
+					return false;
+				out.png.assign(buf.begin() + png_off, buf.begin() + png_off + png_len);
+				return true;
+			}
+		}
+		return false;
+	}
+// END CBDT PARSE
 
 	//! Converts a single code point to a wide string (surrogate pairs if needed)
 	core::stringw charToWideString(char32_t c)
@@ -410,7 +528,19 @@ bool SGUITTGlyph::preload(u32 char_index, FT_Face face, CGUITTFont *parent, u32 
 	parent->applyFaceSize();
 
 	// Attempt to load the glyph.
+	parent->resetDecodedGlyph();
 	auto err = FT_Load_Glyph(face, char_index, loadFlags);
+
+	// FreeType without PNG support can't load color bitmaps: do it ourselves.
+	bool decoded = false;
+	int dec_left = 0, dec_top = 0;
+	long dec_advance = 0;
+	if (err == FT_Err_Unimplemented_Feature && parent->isColorBitmapFont() &&
+			parent->decodeColorGlyph(char_index, dec_left, dec_top, dec_advance)) {
+		decoded = true;
+		err = FT_Err_Ok;
+	}
+
 	if (err != FT_Err_Ok) {
 		warningstream << "SGUITTGlyph: failed to load glyph " << char_index
 			<< " with error: " << (int)err << std::endl;
@@ -418,7 +548,11 @@ bool SGUITTGlyph::preload(u32 char_index, FT_Face face, CGUITTFont *parent, u32 
 	}
 
 	FT_GlyphSlot glyph = face->glyph;
-	const FT_Bitmap &bits = glyph->bitmap;
+	const FT_Bitmap &bits = parent->getLoadedBitmap();
+	const long glyph_advance_x = decoded ? dec_advance : glyph->advance.x;
+	const long glyph_advance_y = decoded ? 0 : glyph->advance.y;
+	const int glyph_left = decoded ? dec_left : glyph->bitmap_left;
+	const int glyph_top = decoded ? dec_top : glyph->bitmap_top;
 
 	// Setup the glyph information here:
 	u32 width = bits.width, height = bits.rows;
@@ -427,10 +561,10 @@ bool SGUITTGlyph::preload(u32 char_index, FT_Face face, CGUITTFont *parent, u32 
 		// Color bitmaps have a fixed size and are scaled down by us.
 		const float scale = parent->getColorBitmapScale();
 		// round the advance up to whole pixels so neighbouring glyphs don't overlap
-		advance = core::vector2di((std::lround(glyph->advance.x * scale) + 63) & ~63L,
-				std::lround(glyph->advance.y * scale));
-		offset = core::vector2di(std::lround(glyph->bitmap_left * scale),
-				std::lround(glyph->bitmap_top * scale));
+		advance = core::vector2di((std::lround(glyph_advance_x * scale) + 63) & ~63L,
+				std::lround(glyph_advance_y * scale));
+		offset = core::vector2di(std::lround(glyph_left * scale),
+				std::lround(glyph_top * scale));
 		if (width > 0)
 			width = std::max<u32>(1, std::lround(width * scale));
 		if (height > 0)
@@ -439,8 +573,8 @@ bool SGUITTGlyph::preload(u32 char_index, FT_Face face, CGUITTFont *parent, u32 
 		width = std::min<u32>(width, slot_size - 1);
 		height = std::min<u32>(height, slot_size - 1);
 	} else {
-		advance = core::vector2di(glyph->advance.x, glyph->advance.y);
-		offset = core::vector2di(glyph->bitmap_left, glyph->bitmap_top);
+		advance = core::vector2di(glyph_advance_x, glyph_advance_y);
+		offset = core::vector2di(glyph_left, glyph_top);
 	}
 
 	// Try to get the last page with available slots.
@@ -511,10 +645,13 @@ CGUITTFont::CGUITTFont(IGUIEnvironment *env) :
 	if (env) {
 		// don't grab environment, to avoid circular references
 		Driver = env->getVideoDriver();
+		FileSystem = env->getFileSystem();
 	}
 
 	if (Driver)
 		Driver->grab();
+	if (FileSystem)
+		FileSystem->grab();
 
 	setInvisibleCharacters(L" ");
 }
@@ -611,6 +748,8 @@ CGUITTFont::~CGUITTFont()
 	// Drop our driver now.
 	if (Driver)
 		Driver->drop();
+	if (FileSystem)
+		FileSystem->drop();
 }
 
 void CGUITTFont::reset_images()
@@ -690,6 +829,62 @@ CGUITTGlyphPage* CGUITTFont::createGlyphPage(const u8 pixel_mode)
 	page->available_slots = (page_texture_size.Width / slot_size) * (page_texture_size.Height / slot_size);
 	Glyph_Pages.push_back(page);
 	return page;
+}
+
+bool CGUITTFont::decodeColorGlyph(FT_UInt glyph_index, int &left, int &top, long &advance_26_6)
+{
+	use_decoded_bitmap = false;
+	if (!color_bitmap_face || !Driver || !FileSystem)
+		return false;
+
+	const int ppem_y = (int)std::lround(tt_face->available_sizes[color_strike_index].y_ppem / 64.0);
+	CBDTGlyph g;
+	if (!loadCBDTGlyph(tt_face, ppem_y, glyph_index, cblc_table, cblc_loaded, g))
+		return false;
+
+	io::IReadFile *file = FileSystem->createMemoryReadFile(g.png.data(),
+			(s32)g.png.size(), "emoji_glyph.png", false);
+	if (!file)
+		return false;
+	video::IImage *img = Driver->createImageFromFile(file);
+	file->drop();
+	if (!img)
+		return false;
+
+	const core::dimension2du dim = img->getDimension();
+	if (dim.Width == 0 || dim.Height == 0) {
+		img->drop();
+		return false;
+	}
+
+	// Convert to premultiplied BGRA like FreeType does
+	decoded_data.assign((size_t)dim.Width * dim.Height * 4, 0);
+	for (u32 y = 0; y < dim.Height; ++y) {
+		for (u32 x = 0; x < dim.Width; ++x) {
+			const video::SColor col = img->getPixel(x, y);
+			const u32 a = col.getAlpha();
+			u8 *px = &decoded_data[((size_t)y * dim.Width + x) * 4];
+			px[0] = (col.getBlue() * a + 127) / 255;
+			px[1] = (col.getGreen() * a + 127) / 255;
+			px[2] = (col.getRed() * a + 127) / 255;
+			px[3] = a;
+		}
+	}
+	img->drop();
+
+	decoded_bitmap = {};
+	decoded_bitmap.rows = dim.Height;
+	decoded_bitmap.width = dim.Width;
+	decoded_bitmap.pitch = (int)dim.Width * 4;
+	decoded_bitmap.buffer = decoded_data.data();
+	decoded_bitmap.num_grays = 256;
+	decoded_bitmap.pixel_mode = FT_PIXEL_MODE_BGRA;
+	use_decoded_bitmap = true;
+
+	left = g.left;
+	top = g.top;
+	advance_26_6 = g.advance * 64;
+	return true;
 }
 
 void CGUITTFont::applyFaceSize() const
@@ -1048,7 +1243,7 @@ u32 CGUITTFont::getGlyphIndexByChar(char32_t c) const
 					glyph.load_failed = true;
 					continue;
 				}
-				auto *surface = glyph.createGlyphImage(tt_face->glyph->bitmap, Driver);
+				auto *surface = glyph.createGlyphImage(this2->getLoadedBitmap(), Driver);
 				Glyph_Pages[glyph.glyph_page]->pushGlyphToBePaged(&glyph, surface);
 			}
 		}
