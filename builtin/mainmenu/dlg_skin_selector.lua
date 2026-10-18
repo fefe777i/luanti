@@ -147,6 +147,9 @@ local function handle_buttons(this, fields)
 			core.settings:set("ws47_skin", skin)
 			core.settings:set("ws47_skin_fullpath",
 				data.skin_dir .. DIR_DELIM .. skin)
+			-- Save now: the game is often closed without a clean exit, and an
+			-- unsaved setting is lost (the chosen skin would reset).
+			core.settings:write()
 		end
 		this:delete()
 		return true
