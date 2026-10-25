@@ -236,7 +236,7 @@ new file mode 100644
 index 0000000..3dc3e8c
 --- /dev/null
 +++ b/src/gui/guiPanZoom.cpp
-@@ -0,0 +1,212 @@
+@@ -0,0 +1,246 @@
 +// Luanti
 +// SPDX-License-Identifier: LGPL-2.1-or-later
 +
@@ -271,6 +271,32 @@ index 0000000..3dc3e8c
 +	m_base.clear();
 +	for (gui::IGUIElement *child : Children)
 +		m_base.push_back(child->getRelativePosition());
++	// every non-box element is attached to the biggest non-box element
++	// that contains its centre (its card); boxes are not attached
++	const size_t cnt = m_base.size();
++	std::vector<bool> is_box;
++	for (gui::IGUIElement *child : Children)
++		is_box.push_back(dynamic_cast<GUIBox *>(child) != nullptr);
++	m_anchor.assign(cnt, 0);
++	for (size_t a = 0; a < cnt; a++) {
++		m_anchor[a] = a;
++		if (is_box[a])
++			continue;
++		const core::rect<s32> &ra = m_base[a];
++		v2s32 c((ra.UpperLeftCorner.X + ra.LowerRightCorner.X) / 2,
++				(ra.UpperLeftCorner.Y + ra.LowerRightCorner.Y) / 2);
++		s64 best = (s64)ra.getWidth() * ra.getHeight();
++		for (size_t b = 0; b < cnt; b++) {
++			if (b == a || is_box[b])
++				continue;
++			const core::rect<s32> &rb = m_base[b];
++			s64 area = (s64)rb.getWidth() * rb.getHeight();
++			if (area > best && rb.isPointInside(c)) {
++				best = area;
++				m_anchor[a] = b;
++			}
++		}
++	}
 +}
 +
 +void GUIPanZoom::applyTransform()
@@ -279,7 +305,8 @@ index 0000000..3dc3e8c
 +	for (gui::IGUIElement *child : Children) {
 +		if (i >= m_base.size())
 +			break;
-+		const core::rect<s32> &r = m_base[i++];
++		const size_t idx = i++;
++		const core::rect<s32> &r = m_base[idx];
 +		core::rect<s32> n;
 +		if (dynamic_cast<GUIBox *>(child)) {
 +			// boxes (links between nodes) are scaled together with the content
@@ -289,13 +316,20 @@ index 0000000..3dc3e8c
 +					(s32)std::lround(m_scale * r.LowerRightCorner.X + m_u.X),
 +					(s32)std::lround(m_scale * r.LowerRightCorner.Y + m_u.Y));
 +		} else {
-+			// everything else keeps its size, only the centre moves
-+			f32 cx = m_scale * (r.UpperLeftCorner.X + r.LowerRightCorner.X) * 0.5f + m_u.X;
-+			f32 cy = m_scale * (r.UpperLeftCorner.Y + r.LowerRightCorner.Y) * 0.5f + m_u.Y;
-+			s32 hw = r.getWidth() / 2, hh = r.getHeight() / 2;
-+			s32 icx = (s32)std::lround(cx), icy = (s32)std::lround(cy);
-+			n = core::rect<s32>(icx - hw, icy - hh,
-+					icx - hw + r.getWidth(), icy - hh + r.getHeight());
++			// Everything else keeps its size. Only the centre of its "card"
++			// (the biggest element it lies in) moves, the element keeps its
++			// offset from that centre, so a card never falls apart.
++			const core::rect<s32> &ra = m_base[m_anchor[idx]];
++			f32 acx = (ra.UpperLeftCorner.X + ra.LowerRightCorner.X) * 0.5f;
++			f32 acy = (ra.UpperLeftCorner.Y + ra.LowerRightCorner.Y) * 0.5f;
++			f32 ccx = (r.UpperLeftCorner.X + r.LowerRightCorner.X) * 0.5f;
++			f32 ccy = (r.UpperLeftCorner.Y + r.LowerRightCorner.Y) * 0.5f;
++			f32 cx = m_scale * acx + m_u.X + (ccx - acx);
++			f32 cy = m_scale * acy + m_u.Y + (ccy - acy);
++			s32 w = r.getWidth(), h = r.getHeight();
++			s32 x0 = (s32)std::lround(cx - w * 0.5f);
++			s32 y0 = (s32)std::lround(cy - h * 0.5f);
++			n = core::rect<s32>(x0, y0, x0 + w, y0 + h);
 +		}
 +		child->setRelativePosition(n);
 +	}
@@ -454,7 +488,7 @@ new file mode 100644
 index 0000000..ae6ad47
 --- /dev/null
 +++ b/src/gui/guiPanZoom.h
-@@ -0,0 +1,81 @@
+@@ -0,0 +1,82 @@
 +// Luanti
 +// SPDX-License-Identifier: LGPL-2.1-or-later
 +
@@ -523,6 +557,7 @@ index 0000000..ae6ad47
 +	f32 m_scale = 1.0f;
 +	v2f32 m_u;
 +	std::vector<core::rect<s32>> m_base; // children's rectangles at the start
++	std::vector<size_t> m_anchor;
 +
 +	// single pointer
 +	bool m_pressed = false;
