@@ -236,11 +236,12 @@ new file mode 100644
 index 0000000..3dc3e8c
 --- /dev/null
 +++ b/src/gui/guiPanZoom.cpp
-@@ -0,0 +1,199 @@
+@@ -0,0 +1,212 @@
 +// Luanti
 +// SPDX-License-Identifier: LGPL-2.1-or-later
 +
 +#include "guiPanZoom.h"
++#include "guiBox.h"
 +#include <IGUIEnvironment.h>
 +#include <algorithm>
 +#include <cmath>
@@ -279,11 +280,23 @@ index 0000000..3dc3e8c
 +		if (i >= m_base.size())
 +			break;
 +		const core::rect<s32> &r = m_base[i++];
-+		core::rect<s32> n(
-+				(s32)std::lround(m_scale * r.UpperLeftCorner.X + m_u.X),
-+				(s32)std::lround(m_scale * r.UpperLeftCorner.Y + m_u.Y),
-+				(s32)std::lround(m_scale * r.LowerRightCorner.X + m_u.X),
-+				(s32)std::lround(m_scale * r.LowerRightCorner.Y + m_u.Y));
++		core::rect<s32> n;
++		if (dynamic_cast<GUIBox *>(child)) {
++			// boxes (links between nodes) are scaled together with the content
++			n = core::rect<s32>(
++					(s32)std::lround(m_scale * r.UpperLeftCorner.X + m_u.X),
++					(s32)std::lround(m_scale * r.UpperLeftCorner.Y + m_u.Y),
++					(s32)std::lround(m_scale * r.LowerRightCorner.X + m_u.X),
++					(s32)std::lround(m_scale * r.LowerRightCorner.Y + m_u.Y));
++		} else {
++			// everything else keeps its size, only the centre moves
++			f32 cx = m_scale * (r.UpperLeftCorner.X + r.LowerRightCorner.X) * 0.5f + m_u.X;
++			f32 cy = m_scale * (r.UpperLeftCorner.Y + r.LowerRightCorner.Y) * 0.5f + m_u.Y;
++			s32 hw = r.getWidth() / 2, hh = r.getHeight() / 2;
++			s32 icx = (s32)std::lround(cx), icy = (s32)std::lround(cy);
++			n = core::rect<s32>(icx - hw, icy - hh,
++					icx - hw + r.getWidth(), icy - hh + r.getHeight());
++		}
 +		child->setRelativePosition(n);
 +	}
 +}
