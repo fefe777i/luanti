@@ -295,80 +295,61 @@ bool RenderingEngine::setWindowIcon()
 	Additionally, a progressbar can be drawn when percent is set between 0 and 100.
 */
 void RenderingEngine::draw_load_screen(const std::wstring &text,
-		gui::IGUIEnvironment *guienv, ITextureSource *tsrc, float dtime,
-		int percent, float *indef_pos)
+  gui::IGUIEnvironment *guienv, ITextureSource *tsrc, float dtime,
+  int percent, float *indef_pos)
 {
-	v2u32 screensize = getWindowSize();
+ v2u32 screensize = getWindowSize();
+ v2s32 center(screensize.X / 2, screensize.Y / 2);
+ const video::SColor bg_color(255, 5, 5, 15);
+ const video::SColor bar_bg_color(255, 40, 40, 60);
+ const video::SColor bar_color(255, 127, 208, 255);
 
-	v2s32 textsize(g_fontengine->getTextWidth(text), g_fontengine->getLineHeight());
-	v2s32 center(screensize.X / 2, screensize.Y / 2);
-	core::rect<s32> textrect(center - textsize / 2, center + textsize / 2);
+ // статус (над смужкою)
+ v2s32 textsize(g_fontengine->getTextWidth(text), g_fontengine->getLineHeight());
+ v2s32 tc(center.X, center.Y - 30);
+ gui::IGUIStaticText *guitext = gui::StaticText::add(guienv, text,
+   core::rect<s32>(tc - textsize / 2, tc + textsize / 2), false, false);
+ guitext->setTextAlignment(gui::EGUIA_CENTER, gui::EGUIA_UPPERLEFT);
+ guitext->setOverrideColor(video::SColor(255, 255, 255, 255));
 
-	gui::IGUIStaticText *guitext =
-			gui::StaticText::add(guienv, text, textrect, false, false);
-	guitext->setTextAlignment(gui::EGUIA_CENTER, gui::EGUIA_UPPERLEFT);
+ // заголовок
+ std::wstring title = L"ПЕРЕХІД";
+ v2s32 titlesize(g_fontengine->getTextWidth(title), g_fontengine->getLineHeight());
+ v2s32 hc(center.X, center.Y - 90);
+ gui::IGUIStaticText *guititle = gui::StaticText::add(guienv, title,
+   core::rect<s32>(hc - titlesize / 2, hc + titlesize / 2), false, false);
+ guititle->setTextAlignment(gui::EGUIA_CENTER, gui::EGUIA_UPPERLEFT);
+ guititle->setOverrideColor(bar_color);
 
-	auto *driver = get_video_driver();
+ auto *driver = get_video_driver();
 
-	driver->setFog(m_menu_sky_color);
-	driver->beginScene(true, true, m_menu_sky_color);
+ driver->setFog(bg_color);
+ driver->beginScene(true, true, bg_color);
 
-	if (g_settings->getBool("menu_clouds")) {
-		g_menuclouds->step(dtime * 3);
-		g_menucloudsmgr->drawAll();
-	}
+ int percent_min = 0;
+ int percent_max = percent;
+ if (indef_pos) {
+  *indef_pos = fmodf(*indef_pos + (dtime * 50.0f), 140.0f);
+  percent_max = std::min((int) *indef_pos, 100);
+  percent_min = std::max((int) *indef_pos - 40, 0);
+ }
 
-	int percent_min = 0;
-	int percent_max = percent;
-	if (indef_pos) {
-		*indef_pos = fmodf(*indef_pos + (dtime * 50.0f), 140.0f);
-		percent_max = std::min((int) *indef_pos, 100);
-		percent_min = std::max((int) *indef_pos - 40, 0);
-	}
-	// draw progress bar
-	if ((percent_min >= 0) && (percent_max <= 100)) {
-		video::ITexture *progress_img = tsrc->getTexture("progress_bar.png");
-		video::ITexture *progress_img_bg =
-				tsrc->getTexture("progress_bar_bg.png");
+ // смужка прогресу
+ if ((percent_min >= 0) && (percent_max <= 100)) {
+  s32 w = screensize.X * 0.4f;
+  s32 h = std::max<s32>(10, screensize.Y / 50);
+  s32 x0 = center.X - w / 2;
+  s32 y0 = center.Y;
+  driver->draw2DRectangle(bar_bg_color,
+    core::rect<s32>(x0, y0, x0 + w, y0 + h));
+  driver->draw2DRectangle(bar_color,
+    core::rect<s32>(x0 + (percent_min * w) / 100, y0,
+      x0 + (percent_max * w) / 100, y0 + h));
+ }
 
-		if (progress_img && progress_img_bg) {
-#ifndef __ANDROID__
-			const core::dimension2d<u32> &img_size =
-					progress_img_bg->getSize();
-			float density = g_settings->getFloat("gui_scaling", 0.5f, 20.0f) *
-					getDisplayDensity();
-			u32 imgW = rangelim(img_size.Width, 200, 600) * density;
-			u32 imgH = rangelim(img_size.Height, 24, 72) * density;
-#else
-			const core::dimension2d<u32> img_size(256, 48);
-			float imgRatio = (float)img_size.Height / img_size.Width;
-			u32 imgW = screensize.X / 2.2f;
-			u32 imgH = floor(imgW * imgRatio);
-#endif
-			v2s32 img_pos((screensize.X - imgW) / 2,
-					(screensize.Y - imgH) / 2);
-
-			draw2DImageFilterScaled(get_video_driver(), progress_img_bg,
-					core::rect<s32>(img_pos.X, img_pos.Y,
-							img_pos.X + imgW,
-							img_pos.Y + imgH),
-					core::rect<s32>(0, 0, img_size.Width,
-							img_size.Height),
-					0, 0, true);
-
-			draw2DImageFilterScaled(get_video_driver(), progress_img,
-					core::rect<s32>(img_pos.X + (percent_min * imgW) / 100, img_pos.Y,
-							img_pos.X + (percent_max * imgW) / 100,
-							img_pos.Y + imgH),
-					core::rect<s32>(percent_min * img_size.Width / 100, 0,
-							percent_max * img_size.Width / 100,
-							img_size.Height),
-					0, 0, true);
-		}
-	}
-
-	guienv->drawAll();
+ guienv->drawAll();
 	driver->endScene();
+	guititle->remove();
 	guitext->remove();
 }
 
