@@ -1,0 +1,796 @@
+diff --git a/builtin/game/dimensions.lua b/builtin/game/dimensions.lua
+index d3349d1..f5409dd 100644
+--- a/builtin/game/dimensions.lua
++++ b/builtin/game/dimensions.lua
+@@ -101,6 +101,67 @@ local function get_dimension_server(dimension)
+ 	end
+ end
+ 
++-- Moves a player to the server of a dimension. In a hosted game the server of
++-- a world only runs while somebody is in it, so it may have to be started
++-- first: the transfer then waits for it (up to a minute) and `on_fail(text)`
++-- is called if that does not work out. Returns like core.transfer_player()
++-- for what can be decided right away.
++local function transfer_to_dimension_server(name, dimension, on_fail, force_disconnect)
++	local function attempt(waited)
++		if not core.get_player_by_name(name) then
++			return true
++		end
++
++		local state, msg
++		if core.wake_dimension_server then
++			state, msg = core.wake_dimension_server(dimension)
++		end
++
++		if state == "failed" then
++			local text = S("Could not start the world \"@1\": @2", dimension, msg or "")
++			if waited == 0 and not force_disconnect then
++				return false, text
++			end
++			on_fail(text)
++			return false, text
++		elseif state == "starting" then
++			if waited >= 120 then
++				local text = S("The world \"@1\" did not start in time.", dimension)
++				on_fail(text)
++				return false, text
++			end
++			if waited == 0 then
++				core.chat_send_player(name,
++					S("The world \"@1\" is loading, please wait...", dimension))
++			end
++			core.after(0.5, attempt, waited + 1)
++			return true
++		end
++
++		local host, port = get_dimension_server(dimension)
++		if not port then
++			local text = S("The world \"@1\" has no server.", dimension)
++			if waited > 0 or force_disconnect then
++				on_fail(text)
++			end
++			return false, text
++		end
++		local ok, err = core.transfer_player(name, host, port)
++		if ok or force_disconnect then
++			-- Clients that cannot be transferred automatically get the port
++			core.after(5, function()
++				if core.get_player_by_name(name) then
++					core.disconnect_player(name,
++						S("Please reconnect to port @1 to enter the world \"@2\".",
++						port, dimension))
++				end
++			end)
++		end
++		return ok, err
++	end
++	return attempt(0)
++end
++
+ function core.travel_to_dimension(player, dimension, pos)
+ 	player = get_player(player)
+ 	if not player then
+@@ -128,26 +189,32 @@ function core.travel_to_dimension(player, dimension, pos)
+ 	meta:set_string(META_ARRIVAL, target and core.pos_to_string(target) or "find")
+ 
+ 	-- Servers with one server per dimension send the player to the right server.
+-	-- Singleplayer and hosted games ("Host game") restart in the other dimension.
+-	local host, port
++	-- Singleplayer restarts in the other dimension. A hosted game ("Host game")
++	-- starts the server of the world on demand: the transfer waits for it.
++	local ok, err
++	local name = player:get_player_name()
++	local one_server_per_dimension = false
+ 	if not core.is_singleplayer() then
+-		host, port = get_dimension_server(dimension)
++		local state, msg
++		if core.wake_dimension_server then
++			state, msg = core.wake_dimension_server(dimension)
++		end
++		if state == "failed" then
++			meta:set_string(META_ARRIVAL, "")
++			return false, msg
++		end
++		local _, port = get_dimension_server(dimension)
++		one_server_per_dimension = (state ~= nil) or (port ~= nil)
+ 	end
+ 
+-	local ok, err
+-	if port then
+-		local name = player:get_player_name()
+-		ok, err = core.transfer_player(name, host, port)
+-		if ok then
+-			-- Clients that cannot be transferred automatically get the port
+-			core.after(5, function()
+-				if core.get_player_by_name(name) then
+-					core.disconnect_player(name,
+-						S("Please reconnect to port @1 to enter the world \"@2\".",
+-						port, dimension))
+-				end
+-			end)
+-		end
++	if one_server_per_dimension then
++		ok, err = transfer_to_dimension_server(name, dimension, function(text)
++			local p = core.get_player_by_name(name)
++			if p then
++				p:get_meta():set_string(META_ARRIVAL, "")
++			end
++			core.chat_send_player(name, text)
++		end)
+ 	else
+ 		ok, err = core.switch_dimension(dimension)
+ 	end
+@@ -171,20 +238,16 @@ core.register_on_joinplayer(function(player)
+ 	local last = meta:get_string(META_CURRENT)
+ 	if arrival == "" and last ~= "" and last ~= here and not core.is_singleplayer()
+ 			and core.settings:get_bool("dimension_rejoin_last", true) then
+-		local host, port = get_dimension_server(last)
++		local _, port = get_dimension_server(last)
+ 		if port then
+ 			local name = player:get_player_name()
+ 			core.after(0, function()
+-				if core.get_player_by_name(name) then
+-					core.transfer_player(name, host, port)
+-				end
+-			end)
+-			core.after(5, function()
+-				if core.get_player_by_name(name) then
+-					core.disconnect_player(name,
+-						S("Please reconnect to port @1 to enter the world \"@2\".",
+-						port, last))
++				local function kick(text)
++					if core.get_player_by_name(name) then
++						core.disconnect_player(name, text)
++					end
+ 				end
++				transfer_to_dimension_server(name, last, kick, true)
+ 			end)
+ 			return
+ 		end
+diff --git a/doc/dimensions.md b/doc/dimensions.md
+index 1dbaa2f..4b65cda 100644
+--- a/doc/dimensions.md
++++ b/doc/dimensions.md
+@@ -45,8 +45,17 @@
+ - Усі UDP-порти треба відкрити для інших гравців. Автоматичний перехід між портами
+   працює в клієнті цього форку; звичайний клієнт отримає повідомлення, до якого порту
+   підключитися.
+-- Кожен світ завантажує всі моди, тому пам'яті потрібно приблизно у кількість світів разів більше.
++- Працює лише сервер Верхнього світу. Сервер іншого світу **запускається, коли хтось іде
++  туди** (гравець бачить "світ завантажується"), а коли в світі нікого нема
++  `dimension_idle_timeout` секунд (за замовчуванням 60), його карта зберігається і сервер
++  зупиняється. Порожній світ не їсть ні процесор, ні пам'ять. Порти резервуються заздалегідь.
++- `dimension_server_step` (за замовчуванням 0.09) - тривалість кроку серверів світів, чим
++  менше, тим частіше працюють моди. Сервер Верхнього світу не повільніший за 0.05.
++- Кожен запущений світ завантажує всі моди, тому пам'яті потрібно приблизно у кількість
++  *запущених* світів разів більше.
+ - Сервери зупиняються, коли хост виходить у головне меню.
++- Lua: `core.wake_dimension_server(name)` -> `"ready"`, `"starting"`, `"failed", повідомлення`
++  або `nil` (якщо це не хостинг з меню). Викликається автоматично в `core.travel_to_dimension`.
+ 
+ ## Сервер
+ 
+diff --git a/src/client/dimensionhost.cpp b/src/client/dimensionhost.cpp
+index 4a4d19c..f6a77a5 100644
+--- a/src/client/dimensionhost.cpp
++++ b/src/client/dimensionhost.cpp
+@@ -9,9 +9,12 @@
+ #include "network/address.h"
+ #include "network/networkexceptions.h"
+ #include "network/socket.h"
++#include "porting.h"
+ #include "server.h"
+ #include "settings.h"
+ #include "util/string.h"
++#include <algorithm>
++#include <vector>
+ 
+ namespace {
+ 
+@@ -43,6 +46,26 @@ bool isPortFree(u16 port)
+ 	}
+ }
+ 
++// Seconds an empty dimension keeps running (0 = never stop)
++float idleTimeout()
++{
++	float t = 60.0f;
++	g_settings->getFloatNoEx("dimension_idle_timeout", t);
++	return t;
++}
++
++// Length of a server tick of the servers of this host. The default of
++// standalone servers (0.09 s) is plenty, ticking faster only multiplies the
++// work of every mod once per dimension.
++float serverStep(bool is_main)
++{
++	float step = 0.09f;
++	g_settings->getFloatNoEx("dimension_server_step", step);
++	step = std::max(step, 0.01f);
++	// The server of the host's own world stays a bit more responsive
++	return is_main ? std::min(step, 0.05f) : step;
++}
++
+ }
+ 
+ DimensionHost::DimensionHost(const std::string &world_path,
+@@ -62,41 +85,60 @@ DimensionHost::~DimensionHost()
+ u16 DimensionHost::getPort(const std::string &dimension) const
+ {
+ 	std::lock_guard<std::mutex> lock(m_mutex);
+-	auto it = m_ports.find(dimension);
+-	return it == m_ports.end() ? 0 : it->second;
++	auto it = m_dims.find(dimension);
++	return it == m_dims.end() ? 0 : it->second.port;
+ }
+ 
+-u16 DimensionHost::allocatePort()
++u16 DimensionHost::allocatePortLocked()
+ {
+-	// m_mutex is not held here (only called by the starting thread)
+ 	for (int i = 0; i < 200; i++) {
+ 		u16 port = m_next_port++;
+ 		if (m_next_port == 0)
+ 			m_next_port = 1024;
+ 		bool used = false;
+-		{
+-			std::lock_guard<std::mutex> lock(m_mutex);
+-			for (const auto &it : m_ports)
+-				used |= (it.second == port);
+-		}
++		for (const auto &it : m_dims)
++			used |= (it.second.port == port);
+ 		if (!used && isPortFree(port))
+ 			return port;
+ 	}
+ 	return 0;
+ }
+ 
+-void DimensionHost::publishSetting()
++DimensionHost::Dim *DimensionHost::registerLocked(const std::string &dimension)
++{
++	u16 port = allocatePortLocked();
++	if (port == 0) {
++		errorstream << "DimensionHost: no free port for the dimension \""
++			<< dimension << "\"" << std::endl;
++		return nullptr;
++	}
++	Dim &d = m_dims[dimension];
++	d.port = port;
++	d.state = State::Stopped;
++	return &d;
++}
++
++std::string DimensionHost::buildSettingLocked() const
+ {
+ 	// "dimension_servers = overworld=30000, nether=30001" (read by
+ 	// core.travel_to_dimension)
++	std::string value;
++	for (const auto &it : m_dims) {
++		if (it.second.port == 0)
++			continue;
++		if (!value.empty())
++			value += ", ";
++		value += it.first + "=" + std::to_string(it.second.port);
++	}
++	return value;
++}
++
++void DimensionHost::publishSetting()
++{
+ 	std::string value;
+ 	{
+ 		std::lock_guard<std::mutex> lock(m_mutex);
+-		for (const auto &it : m_ports) {
+-			if (!value.empty())
+-				value += ", ";
+-			value += it.first + "=" + std::to_string(it.second);
+-		}
++		value = buildSettingLocked();
+ 	}
+ 	g_settings->set("dimension_servers", value);
+ }
+@@ -104,10 +146,15 @@ void DimensionHost::publishSetting()
+ bool DimensionHost::startServer(const std::string &dimension, std::string &error)
+ {
+ 	const bool is_main = (dimension == dimension::DEFAULT_NAME);
+-	u16 port = is_main ? m_base_port : allocatePort();
+-	if (port == 0) {
+-		error = "no free port for the dimension \"" + dimension + "\"";
+-		return false;
++	u16 port;
++	{
++		std::lock_guard<std::mutex> lock(m_mutex);
++		auto it = m_dims.find(dimension);
++		if (it == m_dims.end() || it->second.port == 0) {
++			error = "dimension \"" + dimension + "\" has no port";
++			return false;
++		}
++		port = it->second.port;
+ 	}
+ 
+ 	std::unique_ptr<Server> server;
+@@ -119,7 +166,9 @@ bool DimensionHost::startServer(const std::string &dimension, std::string &error
+ 		server->setMasterAnnounce(is_main);
+ 		server->setDimensionCreatedCallback(
+ 				[this](const std::string &name) { queueDimension(name); });
+-		server->setStepSettings(Server::StepSettings{1.0f / 60.0f, false});
++		server->setDimensionWakeCallback(
++				[this](const std::string &name) { return wake(name); });
++		server->setStepSettings(Server::StepSettings{serverStep(is_main), false});
+ 		server->start();
+ 	} catch (const std::exception &e) {
+ 		error = std::string("dimension \"") + dimension + "\": " + e.what();
+@@ -132,15 +181,49 @@ bool DimensionHost::startServer(const std::string &dimension, std::string &error
+ 
+ 	{
+ 		std::lock_guard<std::mutex> lock(m_mutex);
+-		m_ports[dimension] = port;
+-		m_servers[dimension] = std::move(server);
++		Dim &d = m_dims[dimension];
++		d.server = std::move(server);
++		d.state = State::Running;
++		// Grace period: the player who woke the dimension is still on the way
++		d.last_active = porting::getTimeMs();
+ 	}
+-	publishSetting();
+ 	actionstream << "DimensionHost: dimension \"" << dimension
+ 		<< "\" listens on port " << port << std::endl;
+ 	return true;
+ }
+ 
++void DimensionHost::stopServer(const std::string &dimension)
++{
++	std::unique_ptr<Server> server;
++	{
++		std::lock_guard<std::mutex> lock(m_mutex);
++		auto it = m_dims.find(dimension);
++		if (it == m_dims.end())
++			return;
++		server = std::move(it->second.server);
++	}
++
++	// Saves the map and stops all threads of the dimension (slow, so it is
++	// done without holding the lock)
++	if (server) {
++		actionstream << "DimensionHost: dimension \"" << dimension
++			<< "\" is empty, stopping its server" << std::endl;
++		server.reset();
++	}
++
++	std::lock_guard<std::mutex> lock(m_mutex);
++	Dim &d = m_dims[dimension];
++	d.state = State::Stopped;
++	if (d.restart_after_stop && !m_stopping) {
++		// Somebody wanted to enter the dimension while it was shutting down
++		d.restart_after_stop = false;
++		d.state = State::Starting;
++		d.last_active = porting::getTimeMs();
++		m_tasks.push_back({true, dimension});
++		m_cond.notify_one();
++	}
++}
++
+ void DimensionHost::copyMediaToClientCache(Server *server)
+ {
+ 	// Lets the host's own client skip downloading media it can read from disk
+@@ -155,24 +238,30 @@ void DimensionHost::copyMediaToClientCache(Server *server)
+ 
+ void DimensionHost::queueDimension(const std::string &dimension)
+ {
+-	// May be called from a server thread: only queue, the worker starts it
+-	std::lock_guard<std::mutex> lock(m_mutex);
+-	if (m_stopping || !m_started || m_known.count(dimension))
+-		return;
+-	m_known.insert(dimension);
+-	m_queue.push_back(dimension);
+-	m_cond.notify_one();
++	// May be called from a server thread. Only reserves a port, the server
++	// itself starts when somebody wants to go there.
++	{
++		std::lock_guard<std::mutex> lock(m_mutex);
++		if (m_stopping || !m_started || m_dims.count(dimension))
++			return;
++		if (!registerLocked(dimension))
++			return;
++	}
++	publishSetting();
+ }
+ 
+ bool DimensionHost::start(std::string &error)
+ {
+ 	{
+ 		std::lock_guard<std::mutex> lock(m_mutex);
+-		m_known.insert(dimension::DEFAULT_NAME);
++		Dim &d = m_dims[dimension::DEFAULT_NAME];
++		d.port = m_base_port;
++		d.state = State::Starting;
+ 	}
+ 
+ 	m_had_old_setting = g_settings->getNoEx("dimension_servers", m_old_setting);
+ 	m_setting_saved = true;
++	publishSetting();
+ 
+ 	if (!startServer(dimension::DEFAULT_NAME, error)) {
+ 		stop();
+@@ -184,9 +273,10 @@ bool DimensionHost::start(std::string &error)
+ 		m_started = true;
+ 	}
+ 	// Dimensions that already exist, or were created by mods while the main
+-	// one was loading
++	// one was loading: reserve their ports (no servers are started)
+ 	for (const std::string &name : dimension::list(m_world_path))
+ 		queueDimension(name);
++	publishSetting();
+ 
+ 	m_worker = std::thread([this] { workerMain(); });
+ 	return true;
+@@ -195,29 +285,118 @@ bool DimensionHost::start(std::string &error)
+ void DimensionHost::workerMain()
+ {
+ 	while (true) {
+-		std::string dimension;
++		Task task;
+ 		{
+ 			std::unique_lock<std::mutex> lock(m_mutex);
+-			m_cond.wait(lock, [this] { return m_stopping || !m_queue.empty(); });
++			m_cond.wait(lock, [this] { return m_stopping || !m_tasks.empty(); });
+ 			if (m_stopping)
+ 				return;
+-			dimension = m_queue.front();
+-			m_queue.pop_front();
++			task = m_tasks.front();
++			m_tasks.pop_front();
+ 		}
++
++		if (!task.start) {
++			stopServer(task.name);
++			continue;
++		}
++
+ 		std::string error;
+-		if (!startServer(dimension, error))
++		if (!startServer(task.name, error)) {
+ 			errorstream << "DimensionHost: could not start " << error << std::endl;
++			std::lock_guard<std::mutex> lock(m_mutex);
++			Dim &d = m_dims[task.name];
++			d.state = State::Failed;
++			d.error = error;
++		}
+ 	}
+ }
+ 
++std::string DimensionHost::wake(const std::string &dimension)
++{
++	bool publish = false;
++	std::string result;
++	{
++		std::lock_guard<std::mutex> lock(m_mutex);
++		if (m_stopping || !m_started)
++			return "failed:the host is not ready";
++
++		auto it = m_dims.find(dimension);
++		if (it == m_dims.end()) {
++			// Created behind our back (not announced by a server)
++			if (!dimension::exists(m_world_path, dimension))
++				return "failed:unknown world \"" + dimension + "\"";
++			if (!registerLocked(dimension))
++				return "failed:no free port for the world \"" + dimension + "\"";
++			it = m_dims.find(dimension);
++			publish = true;
++		}
++
++		Dim &d = it->second;
++		const u64 now = porting::getTimeMs();
++		switch (d.state) {
++		case State::Running:
++			d.last_active = now;
++			result = "ready";
++			break;
++		case State::Starting:
++			result = "starting";
++			break;
++		case State::Stopping:
++			d.restart_after_stop = true;
++			result = "starting";
++			break;
++		case State::Failed:
++			// Report the error once, the next call tries again
++			d.state = State::Stopped;
++			result = "failed:" + d.error;
++			break;
++		case State::Stopped:
++			d.state = State::Starting;
++			d.last_active = now;
++			m_tasks.push_back({true, dimension});
++			m_cond.notify_one();
++			result = "starting";
++			break;
++		}
++	}
++	if (publish)
++		publishSetting();
++	return result;
++}
++
+ void DimensionHost::step()
+ {
++	const u64 now = porting::getTimeMs();
++	const float idle_ms = idleTimeout() * 1000.0f;
+ 	std::vector<Server *> servers;
+ 	{
+ 		std::lock_guard<std::mutex> lock(m_mutex);
+-		for (auto &it : m_servers)
+-			servers.push_back(it.second.get());
++		const bool check_idle = now - m_last_idle_check >= 1000;
++		if (check_idle)
++			m_last_idle_check = now;
++
++		for (auto &it : m_dims) {
++			Dim &d = it.second;
++			if (d.state != State::Running || !d.server)
++				continue;
++			servers.push_back(d.server.get());
++
++			if (!check_idle || idle_ms <= 0.0f ||
++					it.first == dimension::DEFAULT_NAME)
++				continue;
++			if (d.server->getConnectedClientCount() > 0) {
++				d.last_active = now;
++			} else if (now - d.last_active > idle_ms) {
++				// Only the worker destroys a server, and only after this
++				// state change, which is made on this thread: the pointers
++				// collected above stay valid until we return.
++				d.state = State::Stopping;
++				m_tasks.push_back({false, it.first});
++				m_cond.notify_one();
++			}
++		}
+ 	}
++	// Outside the lock: rethrows fatal errors of the servers
+ 	for (Server *server : servers)
+ 		server->step();
+ }
+@@ -225,8 +404,9 @@ void DimensionHost::step()
+ bool DimensionHost::isShutdownRequested() const
+ {
+ 	std::lock_guard<std::mutex> lock(m_mutex);
+-	for (const auto &it : m_servers) {
+-		if (it.second->isShutdownRequested())
++	for (const auto &it : m_dims) {
++		if (it.second.server && it.second.state == State::Running &&
++				it.second.server->isShutdownRequested())
+ 			return true;
+ 	}
+ 	return false;
+@@ -242,21 +422,24 @@ void DimensionHost::stop()
+ 	if (m_worker.joinable())
+ 		m_worker.join();
+ 
+-	std::map<std::string, std::unique_ptr<Server>> servers;
++	// Stop the other dimensions first, the main one last
++	std::vector<std::unique_ptr<Server>> servers;
++	std::unique_ptr<Server> main_server;
+ 	{
+ 		std::lock_guard<std::mutex> lock(m_mutex);
+-		servers.swap(m_servers);
+-		m_ports.clear();
+-	}
+-
+-	// Stop the other dimensions first, the main one last
+-	for (auto it = servers.begin(); it != servers.end();) {
+-		if (it->first != dimension::DEFAULT_NAME)
+-			it = servers.erase(it);
+-		else
+-			++it;
++		for (auto &it : m_dims) {
++			if (!it.second.server)
++				continue;
++			if (it.first == dimension::DEFAULT_NAME)
++				main_server = std::move(it.second.server);
++			else
++				servers.push_back(std::move(it.second.server));
++		}
++		m_dims.clear();
++		m_tasks.clear();
+ 	}
+ 	servers.clear();
++	main_server.reset();
+ 
+ 	if (g_settings && m_setting_saved) {
+ 		if (m_had_old_setting)
+diff --git a/src/client/dimensionhost.h b/src/client/dimensionhost.h
+index 4b4d56d..7cd0c6c 100644
+--- a/src/client/dimensionhost.h
++++ b/src/client/dimensionhost.h
+@@ -10,7 +10,6 @@
+ #include <map>
+ #include <memory>
+ #include <mutex>
+-#include <set>
+ #include <string>
+ #include <thread>
+ 
+@@ -22,11 +21,15 @@ class Server;
+ 	All servers live in this process, open the same world folder (players,
+ 	inventories and privileges are shared) and each one loads the map of its
+ 	own dimension, so different players can be in different dimensions at the
+-	same time. The main dimension ("overworld") listens on the port chosen in
+-	the menu, every other dimension on the next free port after it. The
++	same time.
++
++	Only the main dimension ("overworld") runs all the time, on the port chosen
++	in the menu. Every other dimension gets a port reserved for it (the
+ 	"dimension_servers" setting is kept up to date, so core.travel_to_dimension()
+-	sends players to the right server. Dimensions created while the game is
+-	running (/newdimension, mods) get their server automatically.
++	knows it), but its server is only started when somebody wants to go there
++	(wake()) and is stopped again, with the map saved, when nobody has been in
++	it for "dimension_idle_timeout" seconds. An empty dimension therefore costs
++	no CPU, no memory and no loaded map, like in Minecraft.
+ 
+ 	The host's own client connects like any other client, so the servers
+ 	outlive game restarts and the host can move between dimensions without
+@@ -39,28 +42,56 @@ class DimensionHost
+ 			u16 base_port);
+ 	~DimensionHost();
+ 
+-	// Starts the main dimension and then the others in the background.
++	// Starts the main dimension and registers the others (not started).
+ 	// Returns false (and sets `error`) when the main dimension failed to start.
+ 	bool start(std::string &error);
+ 	// Stops all servers (blocks until the worlds are saved)
+ 	void stop();
+ 
+ 	u16 getMainPort() const { return m_base_port; }
+-	// 0 when the dimension has no (running) server
++	// 0 when the dimension is unknown
+ 	u16 getPort(const std::string &dimension) const;
+ 
+-	// Called every frame by the game: rethrows fatal server errors
++	// Called every frame by the game: rethrows fatal server errors and stops
++	// the servers of dimensions that have been empty for too long
+ 	void step();
+ 	bool isShutdownRequested() const;
+ 
+ 	// Message of the servers' shutdown errors (empty if none)
+ 	const std::string &getShutdownMessage() const { return m_shutdown_message; }
+ 
++	// Makes sure the server of the dimension is running (starts it in the
++	// background if needed). Returns "ready", "starting" or "failed:<message>".
++	// May be called from any thread.
++	std::string wake(const std::string &dimension);
++
+ private:
++	enum class State { Stopped, Starting, Running, Stopping, Failed };
++
++	struct Dim
++	{
++		State state = State::Stopped;
++		u16 port = 0;
++		std::unique_ptr<Server> server;
++		u64 last_active = 0; // ms
++		bool restart_after_stop = false;
++		std::string error;
++	};
++
++	struct Task
++	{
++		bool start;
++		std::string name;
++	};
++
+ 	bool startServer(const std::string &dimension, std::string &error);
++	void stopServer(const std::string &dimension);
+ 	void queueDimension(const std::string &dimension);
+ 	void workerMain();
+-	u16 allocatePort();
++	// m_mutex must be held
++	Dim *registerLocked(const std::string &dimension);
++	u16 allocatePortLocked();
++	std::string buildSettingLocked() const;
+ 	void publishSetting();
+ 	void copyMediaToClientCache(Server *server);
+ 
+@@ -70,14 +101,13 @@ class DimensionHost
+ 	u16 m_next_port;
+ 
+ 	mutable std::mutex m_mutex;
+-	std::map<std::string, std::unique_ptr<Server>> m_servers;
+-	std::map<std::string, u16> m_ports;
+-	std::set<std::string> m_known; // started or queued
+-	std::deque<std::string> m_queue;
++	std::map<std::string, Dim> m_dims;
++	std::deque<Task> m_tasks;
+ 	std::condition_variable m_cond;
+ 	std::thread m_worker;
+ 	bool m_stopping = false;
+ 	bool m_started = false;
++	u64 m_last_idle_check = 0;
+ 
+ 	bool m_setting_saved = false;
+ 	bool m_had_old_setting = false;
+diff --git a/src/script/lua_api/l_server.cpp b/src/script/lua_api/l_server.cpp
+index 841fbb7..1f02da7 100644
+--- a/src/script/lua_api/l_server.cpp
++++ b/src/script/lua_api/l_server.cpp
+@@ -754,6 +754,27 @@ int ModApiServer::l_switch_dimension(lua_State *L)
+ 	return 2;
+ }
+ 
++// wake_dimension_server(name) -> "ready" | "starting" | "failed", message
++// | nil (this server is not part of a hosted game: nothing to start)
++int ModApiServer::l_wake_dimension_server(lua_State *L)
++{
++	NO_MAP_LOCK_REQUIRED;
++	std::string name = luaL_checkstring(L, 1);
++
++	const std::string state = getServer(L)->wakeDimension(name);
++	if (state.empty()) {
++		lua_pushnil(L);
++		return 1;
++	}
++	if (state.compare(0, 7, "failed:") == 0) {
++		lua_pushstring(L, "failed");
++		lua_pushstring(L, state.c_str() + 7);
++		return 2;
++	}
++	lua_pushstring(L, state.c_str());
++	return 1;
++}
++
+ // transfer_player(name, address, port) -> true | false, error
+ // or transfer_player(name, subworld_name, pos) for custom per-player multiworld logic
+ int ModApiServer::l_transfer_player(lua_State *L)
+@@ -828,6 +849,7 @@ void ModApiServer::Initialize(lua_State *L, int top)
+ 	API_FCT(list_dimensions);
+ 	API_FCT(create_dimension);
+ 	API_FCT(switch_dimension);
++	API_FCT(wake_dimension_server);
+ 	API_FCT(create_subworld);
+ 	API_FCT(transfer_player);
+ 	API_FCT(get_player_subworld);
+diff --git a/src/script/lua_api/l_server.h b/src/script/lua_api/l_server.h
+index 8c7483a..7f4ef74 100644
+--- a/src/script/lua_api/l_server.h
++++ b/src/script/lua_api/l_server.h
+@@ -87,6 +87,9 @@ class ModApiServer : public ModApiBase
+ 	static int l_create_dimension(lua_State *L);
+ 	// switch_dimension(name) -> true | false, error
+ 	static int l_switch_dimension(lua_State *L);
++
++	// wake_dimension_server(name)
++	static int l_wake_dimension_server(lua_State *L);
+ 	// transfer_player(name, address, port) -> true | false, error
+ 	// or transfer_player(name, subworld_name, pos)
+ 	static int l_transfer_player(lua_State *L);
+diff --git a/src/server.h b/src/server.h
+index 23b1a28..4515be6 100644
+--- a/src/server.h
++++ b/src/server.h
+@@ -372,6 +372,17 @@ class Server : public con::PeerHandler, public MapEventReceiver,
+ 	// Set it before start().
+ 	void setDimensionCreatedCallback(std::function<void(const std::string &)> cb)
+ 			{ m_dimension_created_cb = std::move(cb); }
++	// Starts the server of a dimension on demand (hosted games only).
++	// The callback returns "ready", "starting" or "failed:<message>".
++	// Set it before start().
++	void setDimensionWakeCallback(std::function<std::string(const std::string &)> cb)
++			{ m_dimension_wake_cb = std::move(cb); }
++	// Empty string when this server is not part of a hosted game
++	std::string wakeDimension(const std::string &name)
++			{ return m_dimension_wake_cb ? m_dimension_wake_cb(name) : std::string(); }
++	// Clients that are connected or still connecting (thread-safe)
++	u32 getConnectedClientCount()
++			{ return m_clients.getClientIDs(CS_Created).size(); }
+ 	// Directory with the map of the current dimension
+ 	std::string getDimensionPath() const;
+ 	std::vector<std::string> listDimensions() const;
+@@ -720,6 +731,7 @@ class Server : public con::PeerHandler, public MapEventReceiver,
+ 	bool m_announce = true;
+ 	// Called (from any thread) after a dimension was created
+ 	std::function<void(const std::string &)> m_dimension_created_cb;
++	std::function<std::string(const std::string &)> m_dimension_wake_cb;
+ 	std::atomic<bool> m_dimension_switch_requested{false};
+ 	u16 m_max_chatmessage_length;
+ 	// For "dedicated" server list flag
