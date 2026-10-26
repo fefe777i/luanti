@@ -2,7 +2,7 @@
 -- Replaces the public server list with a single fixed server connect form.
 
 -- >>> ВСТАВ СЮДИ IP/АДРЕСУ СВОГО СЕРВЕРА, КОЛИ БУДЕ ГОТОВО <<<
-local SERVER_ADDRESS = ""      -- наприклад "123.45.67.89" або "my.server.com"
+local SERVER_ADDRESS = "10.18.95.90"      -- наприклад "123.45.67.89" або "my.server.com"
 local SERVER_PORT    = 30000   -- стандартний порт Luanti/Minetest, зміни якщо треба
 
 local LOGO = core.formspec_escape(defaulttexturedir .. "ws47_logo.png")
