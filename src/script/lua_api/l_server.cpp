@@ -854,7 +854,6 @@ void ModApiServer::Initialize(lua_State *L, int top)
 	API_FCT(switch_dimension);
 	API_FCT(create_subworld);
 	API_FCT(transfer_player);
-	API_FCT(send_chat_commands);
 	API_FCT(get_player_subworld);
 	API_FCT(list_subworlds);
 
@@ -884,6 +883,8 @@ void ModApiServer::Initialize(lua_State *L, int top)
 	API_FCT(remove_player);
 	API_FCT(unban_player_or_ip);
 	API_FCT(notify_authentication_modified);
+
+	API_FCT(send_chat_commands);
 
 	API_FCT(register_async_dofile);
 	API_FCT(serialize_roundtrip);
