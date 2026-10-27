@@ -90,6 +90,9 @@ private:
 	// transfer_player(name, address, port) -> true | false, error
 	// or transfer_player(name, subworld_name, pos)
 	static int l_transfer_player(lua_State *L);
+
+	// send_chat_commands(name, {{name=, params=, description=}, ...}) -> bool
+	static int l_send_chat_commands(lua_State *L);
 	// get_player_subworld(name)
 	static int l_get_player_subworld(lua_State *L);
 	// list_subworlds()

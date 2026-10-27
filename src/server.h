@@ -10,6 +10,7 @@
 #include "gamedef.h"
 #include "content/subgames.h"
 #include "network/peerhandler.h"
+#include "chatcommandinfo.h"
 #include "util/thread.h"
 #include "util/basic_macros.h"
 #include "util/metricsbackend.h"
@@ -377,6 +378,11 @@ public:
 	// of the same host ("" = the same address), see TOCLIENT_TRANSFER.
 	bool transferPlayer(const std::string &name, const std::string &address,
 			u16 port, std::string &error);
+
+	// Sends the list of chat commands the player may use (chat suggestions).
+	// Returns false if the player is not connected.
+	bool sendChatCommands(const std::string &name,
+			const std::vector<ChatCommandInfo> &commands);
 
 	struct StepSettings {
 		float steplen;

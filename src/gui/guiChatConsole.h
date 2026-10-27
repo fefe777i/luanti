@@ -6,6 +6,7 @@
 
 #include "modalMenu.h"
 #include "chat.h"
+#include "chatcommandinfo.h"
 #include "irr_ptr.h"
 #include <IGUIEnvironment.h>
 
@@ -71,6 +72,20 @@ private:
 
 	// If clicked fragment has a web url, send it to the system default web browser.
 	// Returns true if, and only if a web url was pressed.
+	// Chat command suggestions (shown above the prompt after typing "/")
+	std::vector<const ChatCommandInfo *> getCommandSuggestions(size_t limit) const;
+	void drawCommandSuggestions(s32 prompt_y, u32 font_height);
+	bool commandSuggestionClick(s32 x, s32 y);
+	// Tab completion of the command name. Returns false if not applicable.
+	bool completeCommand();
+
+	struct SuggestionRect
+	{
+		core::recti rect;
+		std::string name;
+	};
+	std::vector<SuggestionRect> m_suggestion_rects;
+
 	bool weblinkClick(s32 col, s32 row);
 
 	// If the selected text changed, we need to update the (X11) primary selection.

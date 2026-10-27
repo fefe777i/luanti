@@ -17,6 +17,7 @@
 #include "guiScrollBar.h"
 #include <IOSOperator.h>
 #include <IVideoDriver.h>
+#include <limits>
 #include <string>
 
 inline u32 clamp_u8(s32 value)
@@ -412,6 +413,115 @@ void GUIChatConsole::drawPrompt()
 		}
 	}
 
+	drawCommandSuggestions(y, font_height);
+}
+
+std::vector<const ChatCommandInfo *> GUIChatConsole::getCommandSuggestions(
+		size_t limit) const
+{
+	std::vector<const ChatCommandInfo *> result;
+	if (!m_client)
+		return result;
+
+	const std::wstring line = m_chat_backend->getPrompt().getLine();
+	// Only while the command name itself is being typed
+	if (line.empty() || line[0] != L'/' || line.find(L' ') != std::wstring::npos)
+		return result;
+
+	const std::string prefix = wide_to_utf8(line.substr(1));
+	for (const ChatCommandInfo &cmd : m_client->getChatCommands()) {
+		if (!str_starts_with(cmd.name, prefix))
+			continue;
+		result.push_back(&cmd);
+		if (result.size() >= limit)
+			break;
+	}
+	return result;
+}
+
+void GUIChatConsole::drawCommandSuggestions(s32 prompt_y, u32 font_height)
+{
+	m_suggestion_rects.clear();
+
+	constexpr size_t MAX_SUGGESTIONS = 5;
+	auto matches = getCommandSuggestions(MAX_SUGGESTIONS);
+	if (matches.empty() || font_height == 0)
+		return;
+
+	// Only as many rows as fit above the prompt line
+	size_t rows = std::min<size_t>(matches.size(),
+			std::max<s32>(prompt_y, 0) / (s32)font_height);
+	if (rows == 0)
+		return;
+
+	const s32 width = AbsoluteClippingRect.getWidth();
+	const s32 pad = m_fontsize.X;
+	const s32 top = prompt_y - (s32)(rows * font_height);
+
+	video::IVideoDriver *driver = Environment->getVideoDriver();
+	driver->draw2DRectangle(video::SColor(235, 24, 24, 28),
+			core::recti(0, top, width, prompt_y), &AbsoluteClippingRect);
+
+	for (size_t i = 0; i < rows; i++) {
+		const ChatCommandInfo &cmd = *matches[i];
+		core::recti row(0, top + (s32)(i * font_height), width,
+				top + (s32)((i + 1) * font_height));
+		m_suggestion_rects.push_back({row, cmd.name});
+
+		const std::wstring name = utf8_to_wide("/" + cmd.name);
+		const std::wstring params = utf8_to_wide(cmd.params);
+		const std::wstring desc = utf8_to_wide(cmd.description);
+
+		s32 x = pad;
+		auto put = [&] (const std::wstring &text, video::SColor color) {
+			if (text.empty())
+				return;
+			core::recti dest(x, row.UpperLeftCorner.Y, width, row.LowerRightCorner.Y);
+			m_font->draw(text.c_str(), dest, color, false, false, &row);
+			x += m_font->getDimension(text.c_str()).Width + pad;
+		};
+		put(name, video::SColor(255, 255, 255, 255));
+		put(params, video::SColor(255, 150, 200, 255));
+		put(desc, video::SColor(255, 160, 160, 160));
+	}
+}
+
+bool GUIChatConsole::commandSuggestionClick(s32 x, s32 y)
+{
+	for (const SuggestionRect &s : m_suggestion_rects) {
+		if (s.rect.isPointInside(core::vector2di(x, y))) {
+			m_chat_backend->getPrompt().replace(utf8_to_wide("/" + s.name + " "));
+			return true;
+		}
+	}
+	return false;
+}
+
+bool GUIChatConsole::completeCommand()
+{
+	auto matches = getCommandSuggestions(std::numeric_limits<size_t>::max());
+	if (matches.empty())
+		return false;
+
+	ChatPrompt &prompt = m_chat_backend->getPrompt();
+	const std::string typed = wide_to_utf8(prompt.getLine().substr(1));
+
+	if (matches.size() == 1) {
+		prompt.replace(utf8_to_wide("/" + matches[0]->name + " "));
+		return true;
+	}
+
+	// Complete up to the longest common prefix of all matches
+	std::string common = matches[0]->name;
+	for (const ChatCommandInfo *m : matches) {
+		size_t n = 0;
+		while (n < common.size() && n < m->name.size() && common[n] == m->name[n])
+			n++;
+		common.resize(n);
+	}
+	if (common.size() > typed.size())
+		prompt.replace(utf8_to_wide("/" + common));
+	return true;
 }
 
 bool GUIChatConsole::OnEvent(const SEvent& event)
@@ -652,6 +762,9 @@ bool GUIChatConsole::OnEvent(const SEvent& event)
 		else if(event.KeyInput.Key == KEY_TAB)
 		{
 			// Tab or Shift-Tab pressed
+			// Command name completion after "/"
+			if (completeCommand())
+				return true;
 			// Nick completion
 			auto names = m_client->getConnectedPlayerNames();
 			bool backwards = event.KeyInput.Shift;
@@ -670,6 +783,12 @@ bool GUIChatConsole::OnEvent(const SEvent& event)
 		{
 			s32 rows = myround(-3.0 * event.MouseInput.Wheel);
 			m_chat_backend->scroll(rows);
+		}
+		// Tap on a command suggestion
+		else if (event.MouseInput.Event == EMIE_LMOUSE_PRESSED_DOWN &&
+				commandSuggestionClick(event.MouseInput.X, event.MouseInput.Y))
+		{
+			return true;
 		}
 		// Middle click or ctrl-click opens weblink, if enabled in config
 		// Otherwise, middle click pastes primary selection

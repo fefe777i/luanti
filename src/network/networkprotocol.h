@@ -719,7 +719,18 @@ enum ToClientCommand : u16
 		u16 port
 	*/
 
-	TOCLIENT_NUM_MSG_TYPES = 0x66,
+	TOCLIENT_CHAT_COMMANDS = 0x66,
+	/*
+		The chat commands the player may use, shown as suggestions in the chat.
+		Replaces the list the client had. Older clients ignore this command.
+		u16 count
+		for each command:
+			std::string name (without the leading "/")
+			std::string params
+			std::string description
+	*/
+
+	TOCLIENT_NUM_MSG_TYPES = 0x67,
 };
 
 enum ToServerCommand : u16

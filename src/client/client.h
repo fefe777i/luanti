@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include "chatcommandinfo.h"
 #include "clientenvironment.h"
 #include "gamedef.h"
 #include "gameparams.h" // ELoginRegister
@@ -215,6 +216,7 @@ public:
 	void handleCommand_MinimapModes(NetworkPacket *pkt);
 	void handleCommand_SetLighting(NetworkPacket *pkt);
 	void handleCommand_Transfer(NetworkPacket *pkt);
+	void handleCommand_ChatCommands(NetworkPacket *pkt);
 	void handleCommand_Camera(NetworkPacket* pkt);
 
 	void ProcessData(NetworkPacket *pkt);
@@ -281,6 +283,12 @@ public:
 	const std::set<std::string> &getConnectedPlayerNames()
 	{
 		return m_env.getPlayerNames();
+	}
+
+	// Server chat commands available to this player (sorted by name)
+	const std::vector<ChatCommandInfo> &getChatCommands() const
+	{
+		return m_chat_commands;
 	}
 
 	float getAnimationTime() const
@@ -521,6 +529,8 @@ private:
 
 	std::unique_ptr<MeshUpdateManager> m_mesh_update_manager;
 	ClientEnvironment m_env;
+
+	std::vector<ChatCommandInfo> m_chat_commands;
 	std::unique_ptr<ParticleManager> m_particle_manager;
 	std::map<v3s16, WieldMeshSceneNode*> m_ghost_nodes;
 	std::unique_ptr<con::IConnection> m_con;

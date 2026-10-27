@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 // Copyright (C) 2015 nerzhul, Loic Blot <loic.blot@unix-experience.fr>
 
+#include <algorithm>
 #include "client/client.h"
 
 #include "exceptions.h"
@@ -1918,6 +1919,36 @@ void Client::handleCommand_SetLighting(NetworkPacket *pkt)
 		// >= 5.16.0-dev
 		*pkt >> lighting.shadow_direction;
 	} while (0);
+}
+
+void Client::handleCommand_ChatCommands(NetworkPacket *pkt)
+{
+	u16 count = 0;
+	*pkt >> count;
+
+	// Sanity limit, the list only feeds the chat suggestions
+	constexpr u16 MAX_COMMANDS = 2048;
+	constexpr size_t MAX_FIELD = 1024;
+
+	std::vector<ChatCommandInfo> commands;
+	commands.reserve(std::min<u16>(count, MAX_COMMANDS));
+	for (u16 i = 0; i < count; i++) {
+		ChatCommandInfo info;
+		*pkt >> info.name >> info.params >> info.description;
+		if (commands.size() >= MAX_COMMANDS || info.name.empty() ||
+				info.name.size() > MAX_FIELD)
+			continue;
+		if (info.params.size() > MAX_FIELD)
+			info.params.resize(MAX_FIELD);
+		if (info.description.size() > MAX_FIELD)
+			info.description.resize(MAX_FIELD);
+		commands.push_back(std::move(info));
+	}
+	std::sort(commands.begin(), commands.end(),
+		[] (const ChatCommandInfo &a, const ChatCommandInfo &b) {
+			return a.name < b.name;
+		});
+	m_chat_commands = std::move(commands);
 }
 
 void Client::handleCommand_Transfer(NetworkPacket *pkt)

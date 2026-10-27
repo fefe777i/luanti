@@ -4301,6 +4301,22 @@ bool Server::transferPlayer(const std::string &name, const std::string &address,
 	return true;
 }
 
+bool Server::sendChatCommands(const std::string &name,
+		const std::vector<ChatCommandInfo> &commands)
+{
+	RemotePlayer *player = m_env->getPlayer(name.c_str());
+	if (!player || player->getPeerId() == PEER_ID_INEXISTENT)
+		return false;
+
+	NetworkPacket pkt(TOCLIENT_CHAT_COMMANDS, 0, player->getPeerId());
+	const size_t count = std::min<size_t>(commands.size(), 65535);
+	pkt << (u16)count;
+	for (size_t i = 0; i < count; i++)
+		pkt << commands[i].name << commands[i].params << commands[i].description;
+	Send(&pkt);
+	return true;
+}
+
 void Server::requestShutdown(const std::string &msg, bool reconnect, float delay)
 {
 	if (delay == 0.0f) {

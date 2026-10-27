@@ -6843,6 +6843,13 @@ Chat
 * `core.chat_send_all(text)`: send chat message to all players
 * `core.chat_send_player(name, text)`: send chat message to specific player
     * `name`: Name of the player
+* `core.send_chat_commands(name, commands)`: sends the list of chat commands
+  to a player, shown as suggestions when they type `/` in the chat.
+    * `commands`: array of `{name = "msg", params = "<name> <message>", description = "..."}`
+      (`name` without the leading `/`)
+    * Done automatically on join and on privilege changes by the builtin game
+      (`builtin/game/chat_command_sync.lua`).
+    * Returns `false` if the player is not connected. Older clients ignore it.
 * `core.format_chat_message(name, message)`
     * Used by the server to format a chat message, based on the setting `chat_message_format`.
       Refer to the documentation of the setting for a list of valid placeholders.

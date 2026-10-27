@@ -783,6 +783,32 @@ int ModApiServer::l_transfer_player(lua_State *L)
 	return 2;
 }
 
+// send_chat_commands(name, list) -> true | false
+int ModApiServer::l_send_chat_commands(lua_State *L)
+{
+	NO_MAP_LOCK_REQUIRED;
+	std::string name = luaL_checkstring(L, 1);
+	luaL_checktype(L, 2, LUA_TTABLE);
+
+	std::vector<ChatCommandInfo> commands;
+	int n = (int)lua_objlen(L, 2);
+	for (int i = 1; i <= n; i++) {
+		lua_rawgeti(L, 2, i);
+		if (lua_istable(L, -1)) {
+			ChatCommandInfo info;
+			getstringfield(L, -1, "name", info.name);
+			getstringfield(L, -1, "params", info.params);
+			getstringfield(L, -1, "description", info.description);
+			if (!info.name.empty())
+				commands.push_back(std::move(info));
+		}
+		lua_pop(L, 1);
+	}
+
+	lua_pushboolean(L, getServer(L)->sendChatCommands(name, commands));
+	return 1;
+}
+
 int ModApiServer::l_create_subworld(lua_State *L)
 {
 	NO_MAP_LOCK_REQUIRED;
@@ -828,6 +854,7 @@ void ModApiServer::Initialize(lua_State *L, int top)
 	API_FCT(switch_dimension);
 	API_FCT(create_subworld);
 	API_FCT(transfer_player);
+	API_FCT(send_chat_commands);
 	API_FCT(get_player_subworld);
 	API_FCT(list_subworlds);
 
