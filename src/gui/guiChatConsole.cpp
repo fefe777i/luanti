@@ -17,6 +17,7 @@
 #include "guiScrollBar.h"
 #include <IOSOperator.h>
 #include <IVideoDriver.h>
+#include <algorithm>
 #include <limits>
 #include <string>
 
@@ -50,6 +51,8 @@ GUIChatConsole::GUIChatConsole(
 	m_menumgr(menumgr),
 	m_animate_time_old(porting::getTimeMs())
 {
+	s_instance = this;
+
 	// load background settings
 	s32 console_alpha = g_settings->getS32("console_alpha");
 	m_background_color.setAlpha(clamp_u8(console_alpha));
@@ -109,6 +112,39 @@ void GUIChatConsole::openConsole(f32 scale)
 	m_animate_time_old = porting::getTimeMs();
 	IGUIElement::setVisible(true);
 	m_menumgr->createdMenu(this);
+}
+
+GUIChatConsole *GUIChatConsole::s_instance = nullptr;
+
+GUIChatConsole::~GUIChatConsole()
+{
+	if (s_instance == this)
+		s_instance = nullptr;
+}
+
+bool GUIChatConsole::handleTouchEvent(const SEvent &event)
+{
+	GUIChatConsole *c = s_instance;
+	if (!c || event.EventType != EET_TOUCH_INPUT_EVENT)
+		return false;
+	if (!c->m_open || !c->Environment->hasFocus(c, true))
+		return false;
+
+	const s32 x = event.TouchInput.X;
+	const s32 y = event.TouchInput.Y;
+	if (event.TouchInput.touchedCount != 1)
+		return c->m_sel_active; // ignore multi-touch while selecting
+
+	switch (event.TouchInput.Event) {
+	case ETIE_PRESSED_DOWN:
+		return c->pointerDown(x, y);
+	case ETIE_MOVED:
+		return c->pointerMove(x, y);
+	case ETIE_LEFT_UP:
+		return c->pointerUp(x, y);
+	default:
+		return false;
+	}
 }
 
 bool GUIChatConsole::isOpen() const
@@ -316,6 +352,24 @@ void GUIChatConsole::drawText()
 	else
 		rect = AbsoluteClippingRect;
 
+	// Highlight of the selected messages
+	if (m_sel_visible) {
+		u32 first, last;
+		if (!selectionRange(first, last) ||
+				(!m_sel_active && selectionText(first, last) != m_sel_text)) {
+			// Scrolled or reformatted, the selection no longer matches
+			clearSelection();
+		} else {
+			video::IVideoDriver *driver = Environment->getVideoDriver();
+			for (u32 row = first; row <= last; row++) {
+				s32 y = row * m_fontsize.Y + m_height - m_desired_height;
+				driver->draw2DRectangle(video::SColor(110, 70, 130, 255),
+						core::recti(rect.UpperLeftCorner.X, y,
+								rect.LowerRightCorner.X, y + m_fontsize.Y), &rect);
+			}
+		}
+	}
+
 	for (u32 row = 0; row < buf.getRows(); ++row)
 	{
 		const ChatFormattedLine& line = buf.getFormattedLine(row);
@@ -352,6 +406,20 @@ void GUIChatConsole::drawText()
 					&rect);
 			}
 		}
+	}
+
+	// Short confirmation after copying
+	if (porting::getTimeMs() < m_copied_until) {
+		const std::wstring label = L" " + wstrgettext("Copied") + L" ";
+		core::dimension2d<u32> size = m_font->getDimension(label.c_str());
+		s32 right = rect.LowerRightCorner.X - m_fontsize.X;
+		s32 bottom = m_height - (s32)m_fontsize.Y; // above the prompt
+		core::recti box(right - (s32)size.Width, bottom - (s32)size.Height,
+				right, bottom);
+		video::IVideoDriver *driver = Environment->getVideoDriver();
+		driver->draw2DRectangle(video::SColor(220, 40, 90, 200), box, &rect);
+		m_font->draw(label.c_str(), box, video::SColor(255, 255, 255, 255),
+				false, true, &rect);
 	}
 
 	updateScrollbar();
@@ -521,6 +589,152 @@ bool GUIChatConsole::completeCommand()
 	}
 	if (common.size() > typed.size())
 		prompt.replace(utf8_to_wide("/" + common));
+	return true;
+}
+
+s32 GUIChatConsole::rowAt(s32 x, s32 y) const
+{
+	if (m_fontsize.Y == 0)
+		return -1;
+	// Same layout as in drawText()
+	const s32 top = m_height - (s32)m_desired_height;
+	s32 right = m_screensize.X;
+	if (m_scrollbar->isVisible())
+		right -= getScrollbarSize(Environment);
+	if (x < 0 || x >= right || y < top)
+		return -1;
+	const s32 row = (y - top) / (s32)m_fontsize.Y;
+	const ChatBuffer &buf = m_chat_backend->getConsoleBuffer();
+	if (row >= (s32)buf.getRows())
+		return -1;
+	if (buf.getFormattedLine(row).fragments.empty())
+		return -1;
+	return row;
+}
+
+std::wstring GUIChatConsole::rowText(u32 row) const
+{
+	const ChatFormattedLine &line =
+			m_chat_backend->getConsoleBuffer().getFormattedLine(row);
+	std::wstring out;
+	for (const ChatFormattedFragment &frag : line.fragments) {
+		if (out.size() < frag.column)
+			out.append(frag.column - out.size(), L' ');
+		out += frag.text.getString();
+	}
+	return out;
+}
+
+bool GUIChatConsole::selectionRange(u32 &first, u32 &last) const
+{
+	const ChatBuffer &buf = m_chat_backend->getConsoleBuffer();
+	const s32 rows = buf.getRows();
+	if (m_sel_anchor_row < 0 || m_sel_row < 0 ||
+			m_sel_anchor_row >= rows || m_sel_row >= rows)
+		return false;
+
+	s32 a = std::min(m_sel_anchor_row, m_sel_row);
+	s32 b = std::max(m_sel_anchor_row, m_sel_row);
+	// Extend to whole messages (a message may be wrapped into several rows)
+	while (a > 0 && !buf.getFormattedLine(a).first &&
+			!buf.getFormattedLine(a - 1).fragments.empty())
+		a--;
+	while (b + 1 < rows && !buf.getFormattedLine(b + 1).first &&
+			!buf.getFormattedLine(b + 1).fragments.empty())
+		b++;
+	first = a;
+	last = b;
+	return true;
+}
+
+std::wstring GUIChatConsole::selectionText(u32 first, u32 last) const
+{
+	const ChatBuffer &buf = m_chat_backend->getConsoleBuffer();
+	std::wstring text;
+	for (u32 row = first; row <= last; row++) {
+		const ChatFormattedLine &line = buf.getFormattedLine(row);
+		if (line.fragments.empty())
+			continue;
+		std::wstring t = rowText(row);
+		// Trim the padding, wrapped rows are joined with one space
+		size_t b = t.find_first_not_of(L' ');
+		if (b == std::wstring::npos)
+			continue;
+		size_t e = t.find_last_not_of(L' ');
+		t = t.substr(b, e - b + 1);
+
+		if (!text.empty())
+			text += line.first ? L'\n' : L' ';
+		text += t;
+	}
+	return text;
+}
+
+void GUIChatConsole::clearSelection()
+{
+	m_sel_active = false;
+	m_sel_visible = false;
+	m_sel_text.clear();
+}
+
+bool GUIChatConsole::pointerDown(s32 x, s32 y)
+{
+	// Tap on a command suggestion
+	if (commandSuggestionClick(x, y)) {
+		clearSelection();
+		return true;
+	}
+
+	s32 row = rowAt(x, y);
+	if (row < 0) {
+		clearSelection();
+		return false;
+	}
+	m_sel_active = true;
+	m_sel_visible = true;
+	m_sel_anchor_row = row;
+	m_sel_row = row;
+	m_sel_text.clear();
+	return true;
+}
+
+bool GUIChatConsole::pointerMove(s32 x, s32 y)
+{
+	if (!m_sel_active)
+		return false;
+	// Keep the nearest row when the pointer leaves the text
+	const s32 top = m_height - (s32)m_desired_height;
+	const s32 rows = m_chat_backend->getConsoleBuffer().getRows();
+	if (m_fontsize.Y == 0 || rows == 0)
+		return true;
+	s32 row = (y - top) / (s32)m_fontsize.Y;
+	if (y < top)
+		row = 0;
+	row = std::max<s32>(0, std::min<s32>(row, rows - 1));
+	if (!m_chat_backend->getConsoleBuffer().getFormattedLine(row).fragments.empty())
+		m_sel_row = row;
+	return true;
+}
+
+bool GUIChatConsole::pointerUp(s32 x, s32 y)
+{
+	if (!m_sel_active)
+		return false;
+	pointerMove(x, y);
+	m_sel_active = false;
+
+	u32 first, last;
+	if (!selectionRange(first, last)) {
+		clearSelection();
+		return true;
+	}
+	m_sel_text = selectionText(first, last);
+	if (m_sel_text.empty()) {
+		clearSelection();
+		return true;
+	}
+	Environment->getOSOperator()->copyToClipboard(wide_to_utf8(m_sel_text).c_str());
+	m_copied_until = porting::getTimeMs() + 1500;
 	return true;
 }
 
@@ -784,9 +998,20 @@ bool GUIChatConsole::OnEvent(const SEvent& event)
 			s32 rows = myround(-3.0 * event.MouseInput.Wheel);
 			m_chat_backend->scroll(rows);
 		}
-		// Tap on a command suggestion
+		// Select messages / tap on a command suggestion
 		else if (event.MouseInput.Event == EMIE_LMOUSE_PRESSED_DOWN &&
-				commandSuggestionClick(event.MouseInput.X, event.MouseInput.Y))
+				!m_is_ctrl_down &&
+				pointerDown(event.MouseInput.X, event.MouseInput.Y))
+		{
+			return true;
+		}
+		else if (event.MouseInput.Event == EMIE_MOUSE_MOVED &&
+				pointerMove(event.MouseInput.X, event.MouseInput.Y))
+		{
+			return true;
+		}
+		else if (event.MouseInput.Event == EMIE_LMOUSE_LEFT_UP &&
+				pointerUp(event.MouseInput.X, event.MouseInput.Y))
 		{
 			return true;
 		}

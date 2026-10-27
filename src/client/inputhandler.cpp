@@ -9,6 +9,7 @@
 #include "inputhandler.h"
 #include "gui/mainmenumanager.h"
 #include "gui/touchcontrols.h"
+#include "gui/guiChatConsole.h"
 #include "hud_element.h"
 #include "log_internal.h"
 #include "client/renderingengine.h"
@@ -266,6 +267,11 @@ bool MyEventReceiver::OnEvent(const SEvent &event)
 			g_touchcontrols->setVisible(false);
 		return g_menumgr.preprocessEvent(event);
 	}
+
+	// The chat console is no menu: give it the touches while it is open
+	if (event.EventType == EET_TOUCH_INPUT_EVENT &&
+			GUIChatConsole::handleTouchEvent(event))
+		return true;
 
 	// Remember whether each key is down or up
 	if (g_touchcontrols && event.EventType == EET_TOUCH_INPUT_EVENT) {

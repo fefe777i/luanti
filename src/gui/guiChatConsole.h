@@ -22,6 +22,12 @@ public:
 			ChatBackend* backend,
 			Client* client,
 			IMenuManager* menumgr);
+	~GUIChatConsole() override;
+
+	// The console is not a modal menu, so touch events do not reach it through
+	// the GUI environment. The input handler offers them here first.
+	// Returns true if the event was used.
+	static bool handleTouchEvent(const SEvent &event);
 
 	// Open the console (height = desired fraction of screen size)
 	// This doesn't open immediately but initiates an animation.
@@ -85,6 +91,28 @@ private:
 		std::string name;
 	};
 	std::vector<SuggestionRect> m_suggestion_rects;
+
+	// Selecting chat messages: tap a message or drag over several of them,
+	// the selected messages are copied to the clipboard on release.
+	// Pointer (mouse or single touch) handling, returns true if consumed.
+	bool pointerDown(s32 x, s32 y);
+	bool pointerMove(s32 x, s32 y);
+	bool pointerUp(s32 x, s32 y);
+	// Row of the console buffer at a screen position, -1 if none
+	s32 rowAt(s32 x, s32 y) const;
+	std::wstring rowText(u32 row) const;
+	// Selected rows, extended to whole messages
+	bool selectionRange(u32 &first, u32 &last) const;
+	std::wstring selectionText(u32 first, u32 last) const;
+	void clearSelection();
+
+	static GUIChatConsole *s_instance;
+	bool m_sel_active = false;  // pointer is down and selecting
+	bool m_sel_visible = false; // highlight is shown
+	s32 m_sel_anchor_row = 0;
+	s32 m_sel_row = 0;
+	std::wstring m_sel_text;    // what was copied, to detect scrolling
+	u64 m_copied_until = 0;     // "Copied" label is shown until this time
 
 	bool weblinkClick(s32 col, s32 row);
 
