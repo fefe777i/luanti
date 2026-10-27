@@ -18,6 +18,7 @@
 #include <IOSOperator.h>
 #include <IVideoDriver.h>
 #include <algorithm>
+#include <cstdlib>
 #include <limits>
 #include <string>
 
@@ -132,12 +133,12 @@ bool GUIChatConsole::handleTouchEvent(const SEvent &event)
 
 	const s32 x = event.TouchInput.X;
 	const s32 y = event.TouchInput.Y;
-	if (event.TouchInput.touchedCount != 1)
-		return c->m_sel_active; // ignore multi-touch while selecting
+	if (event.TouchInput.touchedCount != 1) // ignore multi-touch while busy
+		return c->m_sel_active || c->m_press != Press::None;
 
 	switch (event.TouchInput.Event) {
 	case ETIE_PRESSED_DOWN:
-		return c->pointerDown(x, y);
+		return c->pointerDown(x, y, true);
 	case ETIE_MOVED:
 		return c->pointerMove(x, y);
 	case ETIE_LEFT_UP:
@@ -351,6 +352,8 @@ void GUIChatConsole::drawText()
 		rect = core::rect<s32> (0, 0, m_screensize.X - getScrollbarSize(Environment), m_height);
 	else
 		rect = AbsoluteClippingRect;
+
+	updateLongPress();
 
 	// Highlight of the selected messages
 	if (m_sel_visible) {
@@ -592,17 +595,25 @@ bool GUIChatConsole::completeCommand()
 	return true;
 }
 
-s32 GUIChatConsole::rowAt(s32 x, s32 y) const
+bool GUIChatConsole::inTextArea(s32 x, s32 y) const
 {
 	if (m_fontsize.Y == 0)
-		return -1;
+		return false;
 	// Same layout as in drawText()
 	const s32 top = m_height - (s32)m_desired_height;
 	s32 right = m_screensize.X;
 	if (m_scrollbar->isVisible())
 		right -= getScrollbarSize(Environment);
-	if (x < 0 || x >= right || y < top)
+	const s32 bottom = top + (s32)(m_chat_backend->getConsoleBuffer().getRows() *
+			m_fontsize.Y);
+	return x >= 0 && x < right && y >= top && y < bottom;
+}
+
+s32 GUIChatConsole::rowAt(s32 x, s32 y) const
+{
+	if (!inTextArea(x, y))
 		return -1;
+	const s32 top = m_height - (s32)m_desired_height;
 	const s32 row = (y - top) / (s32)m_fontsize.Y;
 	const ChatBuffer &buf = m_chat_backend->getConsoleBuffer();
 	if (row >= (s32)buf.getRows())
@@ -610,6 +621,22 @@ s32 GUIChatConsole::rowAt(s32 x, s32 y) const
 	if (buf.getFormattedLine(row).fragments.empty())
 		return -1;
 	return row;
+}
+
+void GUIChatConsole::updateLongPress()
+{
+	constexpr u64 HOLD_MS = 400;
+	if (m_press != Press::Pending || m_press_row < 0)
+		return;
+	if (porting::getTimeMs() - m_press_time < HOLD_MS)
+		return;
+	// Held still: start selecting the message under the finger
+	m_press = Press::None;
+	m_sel_active = true;
+	m_sel_visible = true;
+	m_sel_anchor_row = m_press_row;
+	m_sel_row = m_press_row;
+	m_sel_text.clear();
 }
 
 std::wstring GUIChatConsole::rowText(u32 row) const
@@ -677,19 +704,32 @@ void GUIChatConsole::clearSelection()
 	m_sel_text.clear();
 }
 
-bool GUIChatConsole::pointerDown(s32 x, s32 y)
+bool GUIChatConsole::pointerDown(s32 x, s32 y, bool touch)
 {
+	m_press = Press::None;
+	clearSelection();
+
 	// Tap on a command suggestion
-	if (commandSuggestionClick(x, y)) {
-		clearSelection();
+	if (commandSuggestionClick(x, y))
+		return true;
+
+	if (!inTextArea(x, y))
+		return false;
+
+	if (touch) {
+		// Not decided yet: moving scrolls, holding still selects
+		m_press = Press::Pending;
+		m_press_time = porting::getTimeMs();
+		m_press_x = x;
+		m_press_y = y;
+		m_press_row = rowAt(x, y);
+		m_scroll_y = y;
 		return true;
 	}
 
 	s32 row = rowAt(x, y);
-	if (row < 0) {
-		clearSelection();
+	if (row < 0)
 		return false;
-	}
 	m_sel_active = true;
 	m_sel_visible = true;
 	m_sel_anchor_row = row;
@@ -700,6 +740,23 @@ bool GUIChatConsole::pointerDown(s32 x, s32 y)
 
 bool GUIChatConsole::pointerMove(s32 x, s32 y)
 {
+	if (m_press == Press::Pending) {
+		const s32 threshold = std::max<s32>(8, m_fontsize.Y / 2);
+		if (std::abs(y - m_press_y) < threshold && std::abs(x - m_press_x) < threshold)
+			return true; // still a hold, the timer decides
+		m_press = Press::Scrolling;
+		m_scroll_y = m_press_y;
+	}
+	if (m_press == Press::Scrolling) {
+		// The text follows the finger: moving down shows older lines
+		const s32 fh = std::max<s32>(1, m_fontsize.Y);
+		const s32 rows = (y - m_scroll_y) / fh;
+		if (rows != 0) {
+			m_chat_backend->scroll(rows);
+			m_scroll_y += rows * fh;
+		}
+		return true;
+	}
 	if (!m_sel_active)
 		return false;
 	// Keep the nearest row when the pointer leaves the text
@@ -718,6 +775,10 @@ bool GUIChatConsole::pointerMove(s32 x, s32 y)
 
 bool GUIChatConsole::pointerUp(s32 x, s32 y)
 {
+	if (m_press != Press::None) {
+		m_press = Press::None; // a tap or the end of scrolling
+		return true;
+	}
 	if (!m_sel_active)
 		return false;
 	pointerMove(x, y);
@@ -1001,7 +1062,7 @@ bool GUIChatConsole::OnEvent(const SEvent& event)
 		// Select messages / tap on a command suggestion
 		else if (event.MouseInput.Event == EMIE_LMOUSE_PRESSED_DOWN &&
 				!m_is_ctrl_down &&
-				pointerDown(event.MouseInput.X, event.MouseInput.Y))
+				pointerDown(event.MouseInput.X, event.MouseInput.Y, false))
 		{
 			return true;
 		}

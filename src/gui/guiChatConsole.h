@@ -95,11 +95,16 @@ private:
 	// Selecting chat messages: tap a message or drag over several of them,
 	// the selected messages are copied to the clipboard on release.
 	// Pointer (mouse or single touch) handling, returns true if consumed.
-	bool pointerDown(s32 x, s32 y);
+	// Touch: one finger drag scrolls, holding the finger still selects.
+	// Mouse: dragging selects right away (the wheel scrolls).
+	bool pointerDown(s32 x, s32 y, bool touch);
 	bool pointerMove(s32 x, s32 y);
 	bool pointerUp(s32 x, s32 y);
 	// Row of the console buffer at a screen position, -1 if none
 	s32 rowAt(s32 x, s32 y) const;
+	bool inTextArea(s32 x, s32 y) const;
+	// Starts selecting after the finger was held still long enough
+	void updateLongPress();
 	std::wstring rowText(u32 row) const;
 	// Selected rows, extended to whole messages
 	bool selectionRange(u32 &first, u32 &last) const;
@@ -107,6 +112,12 @@ private:
 	void clearSelection();
 
 	static GUIChatConsole *s_instance;
+	enum class Press { None, Pending, Scrolling };
+	Press m_press = Press::None; // touch is down, not decided yet / scrolling
+	u64 m_press_time = 0;
+	s32 m_press_x = 0, m_press_y = 0;
+	s32 m_press_row = -1;
+	s32 m_scroll_y = 0;
 	bool m_sel_active = false;  // pointer is down and selecting
 	bool m_sel_visible = false; // highlight is shown
 	s32 m_sel_anchor_row = 0;
