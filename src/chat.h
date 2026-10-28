@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include <ctime>
 #include <set>
 #include <string>
 #include <vector>
@@ -18,6 +19,8 @@ struct ChatLine
 {
 	// age in seconds
 	f32 age = 0.0f;
+	// time the message arrived (shown next to it in the console)
+	std::time_t time = std::time(nullptr);
 	// name of sending player, or empty if sent by server
 	EnrichedString name;
 	// message text
@@ -53,7 +56,9 @@ struct ChatFormattedLine
 	// Array of text fragments
 	std::vector<ChatFormattedFragment> fragments;
 	// true if first line of one formatted ChatLine
-	bool first;
+	bool first = false;
+	// arrival time of the ChatLine this belongs to
+	std::time_t time = 0;
 };
 
 class ChatBuffer
@@ -111,12 +116,16 @@ public:
 
 	void resize(u32 scrollback);
 
+	// Number of lines added since the start, never decreases
+	u64 getTotalAdded() const { return m_total_added; }
+
 	// Get the current scroll position
 	s32 getScrollPosition() const { return m_scroll; }
 	s32 getTopScrollPos() const;
 	s32 getBottomScrollPos() const;
 
 private:
+	u64 m_total_added = 0;
 	// Scrollback size
 	u32 m_scrollback;
 	// Array of unformatted chat lines

@@ -261,17 +261,18 @@ bool MyEventReceiver::OnEvent(const SEvent &event)
 	else if (event.EventType == EET_TOUCH_INPUT_EVENT)
 		last_pointer_type = PointerType::Touch;
 
+	// The chat console registers as a menu but does not get touch events from
+	// the menu manager, so it has to get them first.
+	if (event.EventType == EET_TOUCH_INPUT_EVENT &&
+			GUIChatConsole::handleTouchEvent(event))
+		return true;
+
 	// Let the menu handle events, if one is active.
 	if (isMenuActive()) {
 		if (g_touchcontrols)
 			g_touchcontrols->setVisible(false);
 		return g_menumgr.preprocessEvent(event);
 	}
-
-	// The chat console is no menu: give it the touches while it is open
-	if (event.EventType == EET_TOUCH_INPUT_EVENT &&
-			GUIChatConsole::handleTouchEvent(event))
-		return true;
 
 	// Remember whether each key is down or up
 	if (g_touchcontrols && event.EventType == EET_TOUCH_INPUT_EVENT) {

@@ -8,6 +8,7 @@
 #include "chat.h"
 #include "chatcommandinfo.h"
 #include "irr_ptr.h"
+#include <ctime>
 #include <IGUIEnvironment.h>
 
 class Client;
@@ -78,6 +79,38 @@ private:
 
 	// If clicked fragment has a web url, send it to the system default web browser.
 	// Returns true if, and only if a web url was pressed.
+	// Layout of the console, in screen pixels. The modern window is a rounded
+	// panel with a header (title, close button), the message rows with the
+	// time of each message, and a footer (command button, input, send button).
+	// The classic console only fills text and footer.
+	struct Layout
+	{
+		s32 top = 0;          // top edge (negative while sliding in)
+		core::recti panel;
+		core::recti header;
+		core::recti pill;     // title
+		core::recti close_btn;
+		core::recti text;     // message rows
+		s32 text_x = 0;       // left edge of the message text
+		s32 ts_right = 0;     // right edge of the times
+		core::recti footer;
+		core::recti slash_btn;
+		core::recti input;
+		core::recti send_btn;
+		core::recti scroll_btn; // "scroll to newest", empty if not shown
+	};
+	Layout getLayout() const;
+	void drawRoundRect(const core::recti &r, s32 radius, video::SColor color) const;
+	void drawModernHeader(const Layout &l);
+	void drawScrollButton(const Layout &l);
+	// Buttons of the modern window, returns true if one was hit
+	bool buttonClick(s32 x, s32 y);
+	void sendPrompt();
+
+	bool m_modern = true;
+	u64 m_prev_total_added = 0;
+	u32 m_unseen = 0; // messages that arrived while scrolled up
+
 	// Chat command suggestions (shown above the prompt after typing "/")
 	std::vector<const ChatCommandInfo *> getCommandSuggestions(size_t limit) const;
 	void drawCommandSuggestions(s32 prompt_y, u32 font_height);

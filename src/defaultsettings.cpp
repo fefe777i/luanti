@@ -288,6 +288,7 @@ void set_default_settings()
 	settings->setDefault("console_height", "0.6");
 	settings->setDefault("console_color", "(0,0,0)");
 	settings->setDefault("console_alpha", "200");
+	settings->setDefault("chat_modern_ui", "true");
 	settings->setDefault("formspec_fullscreen_bg_color", "(0,0,0)");
 	settings->setDefault("formspec_fullscreen_bg_opacity", "140");
 	settings->setDefault("selectionbox_color", "(0,0,0)");

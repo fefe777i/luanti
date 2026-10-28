@@ -954,6 +954,10 @@ console_color (Console color) string (0,0,0)
 #    In-game chat console background alpha (opaqueness, between 0 and 255).
 console_alpha (Console alpha) int 200 0 255
 
+# Modern chat window: header, message times, input field with send button.
+# If disabled, the classic console is used.
+chat_modern_ui (Modern chat window) bool true
+
 #    Optional override for chat weblink color.
 chat_weblink_color (Weblink color) string #8888FF
 

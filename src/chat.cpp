@@ -34,6 +34,7 @@ ChatBuffer::ChatBuffer(u32 scrollback):
 void ChatBuffer::addLine(const EnrichedString &name, const EnrichedString &text)
 {
 	m_lines_modified = true;
+	m_total_added++;
 
 	ChatLine line(name, text);
 	m_unformatted.push_back(line);
@@ -258,6 +259,7 @@ u32 ChatBuffer::formatChatLine(const ChatLine &line, u32 cols,
 		return 0;
 
 	next_line.first = true;
+	next_line.time = line.time;
 	// Set/use forced newline after the last frag in each line
 	bool mark_newline = false;
 

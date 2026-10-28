@@ -18,6 +18,9 @@
 #include <IOSOperator.h>
 #include <IVideoDriver.h>
 #include <algorithm>
+#include <cmath>
+#include <cstdio>
+#include <ctime>
 #include <cstdlib>
 #include <limits>
 #include <string>
@@ -53,6 +56,7 @@ GUIChatConsole::GUIChatConsole(
 	m_animate_time_old(porting::getTimeMs())
 {
 	s_instance = this;
+	m_modern = g_settings->getBool("chat_modern_ui");
 
 	// load background settings
 	s32 console_alpha = g_settings->getS32("console_alpha");
@@ -246,8 +250,17 @@ void GUIChatConsole::draw()
 
 void GUIChatConsole::reformatConsole()
 {
-	s32 cols = m_screensize.X / m_fontsize.X - 2; // make room for a margin (looks better)
-	s32 rows = m_desired_height / m_fontsize.Y - 1; // make room for the input prompt
+	s32 cols, rows;
+	if (m_modern) {
+		const s32 fh = m_fontsize.Y, fw = m_fontsize.X;
+		const s32 m = fh / 2, pad = fh / 2;
+		// panel without header and footer, and without the column of times
+		rows = ((s32)m_desired_height - 2 * m - 4 * fh) / fh;
+		cols = ((s32)m_screensize.X - 2 * m - 3 * pad - 8 * fw) / fw;
+	} else {
+		cols = m_screensize.X / m_fontsize.X - 2; // make room for a margin (looks better)
+		rows = m_desired_height / m_fontsize.Y - 1; // make room for the input prompt
+	}
 	if (cols <= 0 || rows <= 0)
 		cols = rows = 0;
 
@@ -255,6 +268,194 @@ void GUIChatConsole::reformatConsole()
 
 	recalculateConsolePosition();
 	m_chat_backend->reformat(cols, rows);
+
+	if (m_modern) {
+		// The input field is narrower than the console
+		Layout l = getLayout();
+		s32 icols = (l.input.getWidth() - m_fontsize.Y) / (s32)m_fontsize.X;
+		m_chat_backend->getPrompt().reformat(std::max<s32>(icols, 0) + 1);
+	}
+}
+
+GUIChatConsole::Layout GUIChatConsole::getLayout() const
+{
+	Layout l;
+	const s32 fw = m_fontsize.X, fh = m_fontsize.Y;
+	const s32 W = m_screensize.X;
+	const s32 rows = m_chat_backend->getConsoleBuffer().getRows();
+	l.top = m_height - (s32)m_desired_height;
+
+	if (!m_modern) {
+		l.panel = core::recti(0, l.top, W, l.top + (s32)m_desired_height);
+		l.text = core::recti(0, l.top, W, l.top + rows * fh);
+		l.text_x = fw;
+		l.ts_right = 0;
+		l.footer = core::recti(0, l.text.LowerRightCorner.Y, W,
+				l.text.LowerRightCorner.Y + fh);
+		l.input = l.footer;
+		return l;
+	}
+
+	const s32 m = fh / 2, pad = fh / 2, p2 = fh / 4;
+	const s32 hdr = 2 * fh, ftr = 2 * fh;
+	l.panel = core::recti(m, l.top + m, W - m, l.top + (s32)m_desired_height - m);
+	const s32 left = l.panel.UpperLeftCorner.X, right = l.panel.LowerRightCorner.X;
+
+	l.header = core::recti(left, l.panel.UpperLeftCorner.Y, right,
+			l.panel.UpperLeftCorner.Y + hdr);
+	const s32 bh = hdr - pad;
+	const s32 by = l.header.UpperLeftCorner.Y + (hdr - bh) / 2;
+	const s32 title_w = m_font ?
+			(s32)m_font->getDimension(wstrgettext("Chat").c_str()).Width : 4 * fw;
+	l.pill = core::recti(left + pad, by, left + pad + title_w + 2 * pad, by + bh);
+	l.close_btn = core::recti(right - pad - bh, by, right - pad, by + bh);
+
+	l.text = core::recti(left, l.header.LowerRightCorner.Y, right,
+			l.header.LowerRightCorner.Y + rows * fh);
+	l.text_x = left + pad;
+	l.ts_right = right - pad;
+
+	l.footer = core::recti(left, l.panel.LowerRightCorner.Y - ftr, right,
+			l.panel.LowerRightCorner.Y);
+	const s32 ih = ftr - pad;
+	const s32 iy = l.footer.UpperLeftCorner.Y + (ftr - ih) / 2;
+	l.slash_btn = core::recti(left + p2, iy, left + p2 + ih, iy + ih);
+	l.send_btn = core::recti(right - p2 - ih, iy, right - p2, iy + ih);
+	l.input = core::recti(l.slash_btn.LowerRightCorner.X + p2, iy,
+			l.send_btn.UpperLeftCorner.X - p2, iy + ih);
+
+	// "scroll to newest" while looking at older messages
+	const ChatBuffer &buf = m_chat_backend->getConsoleBuffer();
+	if (buf.getScrollPosition() < buf.getBottomScrollPos()) {
+		const s32 w = 4 * fw + (m_unseen > 0 ?
+				(s32)(std::to_string(m_unseen).size() + 1) * fw : 0);
+		const s32 h = fh + fh / 2;
+		const s32 cx = (left + right) / 2;
+		const s32 bottom = l.text.LowerRightCorner.Y - pad;
+		l.scroll_btn = core::recti(cx - w / 2 - pad, bottom - h,
+				cx + w / 2 + pad, bottom);
+	}
+	return l;
+}
+
+void GUIChatConsole::drawRoundRect(const core::recti &r, s32 radius,
+		video::SColor color) const
+{
+	if (r.getWidth() <= 0 || r.getHeight() <= 0)
+		return;
+	radius = std::min({radius, r.getWidth() / 2, r.getHeight() / 2});
+	video::IVideoDriver *driver = Environment->getVideoDriver();
+	const core::recti *clip = &AbsoluteClippingRect;
+
+	driver->draw2DRectangle(color, core::recti(r.UpperLeftCorner.X,
+			r.UpperLeftCorner.Y + radius, r.LowerRightCorner.X,
+			r.LowerRightCorner.Y - radius), clip);
+	for (s32 i = 0; i < radius; i++) {
+		const f32 dy = radius - i - 0.5f;
+		const s32 inset = radius - (s32)std::sqrt(std::max(0.0f,
+				(f32)radius * radius - dy * dy));
+		driver->draw2DRectangle(color, core::recti(r.UpperLeftCorner.X + inset,
+				r.UpperLeftCorner.Y + i, r.LowerRightCorner.X - inset,
+				r.UpperLeftCorner.Y + i + 1), clip);
+		driver->draw2DRectangle(color, core::recti(r.UpperLeftCorner.X + inset,
+				r.LowerRightCorner.Y - i - 1, r.LowerRightCorner.X - inset,
+				r.LowerRightCorner.Y - i), clip);
+	}
+}
+
+void GUIChatConsole::drawModernHeader(const Layout &l)
+{
+	video::IVideoDriver *driver = Environment->getVideoDriver();
+	const s32 fh = m_fontsize.Y;
+
+	// Title
+	drawRoundRect(l.pill, l.pill.getHeight() / 2, video::SColor(255, 70, 72, 84));
+	m_font->draw(wstrgettext("Chat").c_str(), l.pill,
+			video::SColor(255, 255, 255, 255), true, true, &AbsoluteClippingRect);
+
+	// Close button: a cross
+	const core::recti &b = l.close_btn;
+	const s32 cx = (b.UpperLeftCorner.X + b.LowerRightCorner.X) / 2;
+	const s32 cy = (b.UpperLeftCorner.Y + b.LowerRightCorner.Y) / 2;
+	const s32 s = std::max(3, fh / 3);
+	const video::SColor white(255, 235, 235, 240);
+	for (s32 o = 0; o < 2; o++) {
+		driver->draw2DLine(core::vector2di(cx - s + o, cy - s),
+				core::vector2di(cx + s + o, cy + s), white);
+		driver->draw2DLine(core::vector2di(cx - s + o, cy + s),
+				core::vector2di(cx + s + o, cy - s), white);
+	}
+}
+
+void GUIChatConsole::drawScrollButton(const Layout &l)
+{
+	if (l.scroll_btn.getWidth() <= 0)
+		return;
+	video::IVideoDriver *driver = Environment->getVideoDriver();
+	const core::recti &b = l.scroll_btn;
+	drawRoundRect(b, b.getHeight() / 2, video::SColor(235, 60, 100, 220));
+
+	// Arrow pointing down, followed by the number of unseen messages
+	const s32 fh = m_fontsize.Y;
+	const s32 pad = fh / 2;
+	const s32 ax = b.UpperLeftCorner.X + pad + fh / 3;
+	const s32 ay = (b.UpperLeftCorner.Y + b.LowerRightCorner.Y) / 2;
+	const s32 s = std::max(3, fh / 4);
+	const video::SColor white(255, 255, 255, 255);
+	for (s32 o = 0; o < 2; o++) {
+		driver->draw2DLine(core::vector2di(ax - s, ay - s / 2 + o),
+				core::vector2di(ax, ay + s / 2 + o), white);
+		driver->draw2DLine(core::vector2di(ax + s, ay - s / 2 + o),
+				core::vector2di(ax, ay + s / 2 + o), white);
+	}
+	if (m_unseen > 0) {
+		const std::wstring n = utf8_to_wide(std::to_string(m_unseen));
+		core::recti t(ax + s + fh / 3, b.UpperLeftCorner.Y, b.LowerRightCorner.X,
+				b.LowerRightCorner.Y);
+		m_font->draw(n.c_str(), t, white, false, true, &AbsoluteClippingRect);
+	}
+}
+
+void GUIChatConsole::sendPrompt()
+{
+	ChatPrompt &prompt = m_chat_backend->getPrompt();
+	prompt.addToHistory(prompt.getLine());
+	std::wstring text = prompt.replace(L"");
+	m_client->typeChatMessage(text);
+	if (m_close_on_enter) {
+		closeConsoleAtOnce();
+		m_close_on_enter = false;
+	}
+}
+
+bool GUIChatConsole::buttonClick(s32 x, s32 y)
+{
+	if (!m_modern)
+		return false;
+	const Layout l = getLayout();
+	const core::vector2di p(x, y);
+
+	if (l.close_btn.isPointInside(p)) {
+		closeConsoleAtOnce();
+		m_close_on_enter = false;
+		// inhibit open so the_game doesn't reopen immediately
+		m_open_inhibited = 1;
+		return true;
+	}
+	if (l.send_btn.isPointInside(p)) {
+		sendPrompt();
+		return true;
+	}
+	if (l.slash_btn.isPointInside(p)) {
+		m_chat_backend->getPrompt().input(L'/');
+		return true;
+	}
+	if (l.scroll_btn.getWidth() > 0 && l.scroll_btn.isPointInside(p)) {
+		m_chat_backend->getConsoleBuffer().scrollBottom();
+		m_unseen = 0;
+		return true;
+	}
+	return false;
 }
 
 void GUIChatConsole::recalculateConsolePosition()
@@ -320,6 +521,11 @@ void GUIChatConsole::animate(u32 msec)
 void GUIChatConsole::drawBackground()
 {
 	video::IVideoDriver* driver = Environment->getVideoDriver();
+	if (m_modern) {
+		const Layout l = getLayout();
+		drawRoundRect(l.panel, m_fontsize.Y, m_background_color);
+		return;
+	}
 	if (m_background != NULL)
 	{
 		core::rect<s32> sourcerect(0, -m_height, m_screensize.X, 0);
@@ -340,6 +546,19 @@ void GUIChatConsole::drawBackground()
 	}
 }
 
+static std::wstring formatChatTime(std::time_t t)
+{
+	std::tm tmv{};
+#ifdef _WIN32
+	localtime_s(&tmv, &t);
+#else
+	localtime_r(&t, &tmv);
+#endif
+	char buf[16];
+	snprintf(buf, sizeof(buf), "%02d:%02d:%02d", tmv.tm_hour, tmv.tm_min, tmv.tm_sec);
+	return utf8_to_wide(buf);
+}
+
 void GUIChatConsole::drawText()
 {
 	if (!m_font)
@@ -347,8 +566,24 @@ void GUIChatConsole::drawText()
 
 	ChatBuffer& buf = m_chat_backend->getConsoleBuffer();
 
+	// Count messages that arrive while the user looks at older ones
+	{
+		const u64 total = buf.getTotalAdded();
+		if (buf.getScrollPosition() >= buf.getBottomScrollPos())
+			m_unseen = 0;
+		else if (total > m_prev_total_added)
+			m_unseen += (u32)(total - m_prev_total_added);
+		m_prev_total_added = total;
+	}
+
+	const Layout l = getLayout();
+	if (m_modern)
+		drawModernHeader(l);
+
 	core::recti rect;
-	if (m_scrollbar->isVisible())
+	if (m_modern)
+		rect = l.text;
+	else if (m_scrollbar->isVisible())
 		rect = core::rect<s32> (0, 0, m_screensize.X - getScrollbarSize(Environment), m_height);
 	else
 		rect = AbsoluteClippingRect;
@@ -365,7 +600,7 @@ void GUIChatConsole::drawText()
 		} else {
 			video::IVideoDriver *driver = Environment->getVideoDriver();
 			for (u32 row = first; row <= last; row++) {
-				s32 y = row * m_fontsize.Y + m_height - m_desired_height;
+				s32 y = l.text.UpperLeftCorner.Y + row * m_fontsize.Y;
 				driver->draw2DRectangle(video::SColor(110, 70, 130, 255),
 						core::recti(rect.UpperLeftCorner.X, y,
 								rect.LowerRightCorner.X, y + m_fontsize.Y), &rect);
@@ -380,12 +615,12 @@ void GUIChatConsole::drawText()
 			continue;
 
 		s32 line_height = m_fontsize.Y;
-		s32 y = row * line_height + m_height - m_desired_height;
+		s32 y = l.text.UpperLeftCorner.Y + row * line_height;
 		if (y + line_height < 0)
 			continue;
 
 		for (const ChatFormattedFragment &fragment : line.fragments) {
-			s32 x = (fragment.column + 1) * m_fontsize.X;
+			s32 x = l.text_x + fragment.column * m_fontsize.X;
 			core::rect<s32> destrect(
 				x, y, x + m_fontsize.X * fragment.text.size(), y + m_fontsize.Y);
 
@@ -409,6 +644,35 @@ void GUIChatConsole::drawText()
 					&rect);
 			}
 		}
+
+		// Time of the message, at the right edge
+		if (m_modern && line.first && line.time != 0) {
+			const std::wstring ts = formatChatTime(line.time);
+			const s32 tw = m_font->getDimension(ts.c_str()).Width;
+			core::recti tr(l.ts_right - tw, y, l.ts_right, y + line_height);
+			m_font->draw(ts.c_str(), tr, video::SColor(255, 150, 152, 165),
+					false, false, &rect);
+		}
+	}
+
+	if (m_modern) {
+		// Thin scroll indicator at the right edge
+		const s32 top_pos = buf.getTopScrollPos();
+		const s32 bot_pos = buf.getBottomScrollPos();
+		if (bot_pos > top_pos && buf.getRows() > 0) {
+			const s32 th = l.text.getHeight();
+			const s32 total = (bot_pos - top_pos) + (s32)buf.getRows();
+			const s32 thumb_h = std::max<s32>(m_fontsize.Y,
+					th * (s32)buf.getRows() / total);
+			const f32 frac = (f32)(buf.getScrollPosition() - top_pos) /
+					(f32)(bot_pos - top_pos);
+			const s32 ty = l.text.UpperLeftCorner.Y +
+					(s32)((th - thumb_h) * std::min(1.0f, std::max(0.0f, frac)));
+			drawRoundRect(core::recti(l.panel.LowerRightCorner.X - 6, ty,
+					l.panel.LowerRightCorner.X - 2, ty + thumb_h), 2,
+					video::SColor(170, 110, 150, 255));
+		}
+		drawScrollButton(l);
 	}
 
 	// Short confirmation after copying
@@ -416,7 +680,8 @@ void GUIChatConsole::drawText()
 		const std::wstring label = L" " + wstrgettext("Copied") + L" ";
 		core::dimension2d<u32> size = m_font->getDimension(label.c_str());
 		s32 right = rect.LowerRightCorner.X - m_fontsize.X;
-		s32 bottom = m_height - (s32)m_fontsize.Y; // above the prompt
+		s32 bottom = m_modern ? l.footer.UpperLeftCorner.Y - (s32)m_fontsize.Y / 2
+				: m_height - (s32)m_fontsize.Y; // above the prompt
 		core::recti box(right - (s32)size.Width, bottom - (s32)size.Height,
 				right, bottom);
 		video::IVideoDriver *driver = Environment->getVideoDriver();
@@ -435,6 +700,58 @@ void GUIChatConsole::drawPrompt()
 
 	ChatPrompt& prompt = m_chat_backend->getPrompt();
 	std::wstring prompt_text = prompt.getVisiblePortion();
+
+	if (m_modern) {
+		const Layout l = getLayout();
+		video::IVideoDriver *driver = Environment->getVideoDriver();
+		const s32 fh = m_fontsize.Y, pad = m_fontsize.Y / 2;
+		const s32 bh = l.input.getHeight();
+		const video::SColor white(255, 255, 255, 255);
+
+		// "/" button, input field and send button
+		drawRoundRect(l.slash_btn, bh / 2, video::SColor(255, 52, 54, 64));
+		m_font->draw(L"/", l.slash_btn, white, true, true, &AbsoluteClippingRect);
+		drawRoundRect(l.input, bh / 2, video::SColor(255, 30, 31, 38));
+		drawRoundRect(l.send_btn, bh / 2, video::SColor(255, 60, 100, 220));
+
+		// Send arrow: a filled triangle pointing right
+		const s32 s = std::max(4, bh / 4);
+		const s32 ax = (l.send_btn.UpperLeftCorner.X + l.send_btn.LowerRightCorner.X) / 2 - s / 2;
+		const s32 ay = (l.send_btn.UpperLeftCorner.Y + l.send_btn.LowerRightCorner.Y) / 2;
+		for (s32 i = 0; i <= 2 * s; i++) {
+			const s32 hh = (s * (2 * s - i)) / (2 * s);
+			driver->draw2DRectangle(white, core::recti(ax + i, ay - hh, ax + i + 1,
+					ay + hh + 1), &AbsoluteClippingRect);
+		}
+
+		// The text of the input field (without the prompt character)
+		std::wstring shown = prompt_text;
+		if (!shown.empty())
+			shown.erase(0, 1);
+		const s32 tx = l.input.UpperLeftCorner.X + pad;
+		const s32 ty = l.input.UpperLeftCorner.Y + (bh - fh) / 2;
+		core::recti tr(tx, ty, l.input.LowerRightCorner.X - pad, ty + fh);
+		if (shown.empty()) {
+			m_font->draw(wstrgettext("Enter").c_str(), tr,
+					video::SColor(255, 120, 122, 135), false, false, &tr);
+		} else {
+			m_font->draw(shown.c_str(), tr, white, false, false, &tr);
+		}
+
+		// Cursor
+		if ((m_cursor_blink & 0x8000) != 0) {
+			const s32 cursor_pos = prompt.getVisibleCursorPosition() - 1;
+			if (cursor_pos >= 0 && cursor_pos <= (s32)shown.size()) {
+				const s32 cx = tx + m_font->getDimension(
+						shown.substr(0, cursor_pos).c_str()).Width;
+				driver->draw2DRectangle(white,
+						core::recti(cx, ty, cx + 2, ty + fh), &tr);
+			}
+		}
+
+		drawCommandSuggestions(l.footer.UpperLeftCorner.Y, fh);
+		return;
+	}
 
 	u32 font_width  = m_fontsize.X;
 	u32 font_height = m_fontsize.Y;
@@ -600,20 +917,18 @@ bool GUIChatConsole::inTextArea(s32 x, s32 y) const
 	if (m_fontsize.Y == 0)
 		return false;
 	// Same layout as in drawText()
-	const s32 top = m_height - (s32)m_desired_height;
-	s32 right = m_screensize.X;
-	if (m_scrollbar->isVisible())
-		right -= getScrollbarSize(Environment);
-	const s32 bottom = top + (s32)(m_chat_backend->getConsoleBuffer().getRows() *
-			m_fontsize.Y);
-	return x >= 0 && x < right && y >= top && y < bottom;
+	core::recti area = getLayout().text;
+	if (!m_modern && m_scrollbar->isVisible())
+		area.LowerRightCorner.X -= getScrollbarSize(Environment);
+	return x >= area.UpperLeftCorner.X && x < area.LowerRightCorner.X &&
+			y >= area.UpperLeftCorner.Y && y < area.LowerRightCorner.Y;
 }
 
 s32 GUIChatConsole::rowAt(s32 x, s32 y) const
 {
 	if (!inTextArea(x, y))
 		return -1;
-	const s32 top = m_height - (s32)m_desired_height;
+	const s32 top = getLayout().text.UpperLeftCorner.Y;
 	const s32 row = (y - top) / (s32)m_fontsize.Y;
 	const ChatBuffer &buf = m_chat_backend->getConsoleBuffer();
 	if (row >= (s32)buf.getRows())
@@ -709,6 +1024,10 @@ bool GUIChatConsole::pointerDown(s32 x, s32 y, bool touch)
 	m_press = Press::None;
 	clearSelection();
 
+	// Buttons of the window (close, "/", send, scroll to newest)
+	if (buttonClick(x, y))
+		return true;
+
 	// Tap on a command suggestion
 	if (commandSuggestionClick(x, y))
 		return true;
@@ -760,7 +1079,7 @@ bool GUIChatConsole::pointerMove(s32 x, s32 y)
 	if (!m_sel_active)
 		return false;
 	// Keep the nearest row when the pointer leaves the text
-	const s32 top = m_height - (s32)m_desired_height;
+	const s32 top = getLayout().text.UpperLeftCorner.Y;
 	const s32 rows = m_chat_backend->getConsoleBuffer().getRows();
 	if (m_fontsize.Y == 0 || rows == 0)
 		return true;
@@ -1082,12 +1401,16 @@ bool GUIChatConsole::OnEvent(const SEvent& event)
 				(event.MouseInput.Event == EMIE_LMOUSE_PRESSED_DOWN && m_is_ctrl_down))
 		{
 			// If clicked within console output region
-			if (event.MouseInput.Y / m_fontsize.Y < (m_height / m_fontsize.Y) - 1 )
+			const Layout lay = getLayout();
+			if (m_modern ? inTextArea(event.MouseInput.X, event.MouseInput.Y) :
+					event.MouseInput.Y / m_fontsize.Y < (m_height / m_fontsize.Y) - 1 )
 			{
 				// Translate pixel position to font position
+				const s32 wl_col = (event.MouseInput.X - lay.text_x) / (s32)m_fontsize.X + 1;
+				const s32 wl_row = (event.MouseInput.Y - lay.text.UpperLeftCorner.Y) /
+						(s32)m_fontsize.Y;
 				bool was_url_pressed = m_cache_clickable_chat_weblinks &&
-						weblinkClick(event.MouseInput.X / m_fontsize.X,
-								event.MouseInput.Y / m_fontsize.Y);
+						weblinkClick(wl_col, wl_row);
 
 				if (!was_url_pressed
 						&& event.MouseInput.Event == EMIE_MMOUSE_PRESSED_DOWN) {
@@ -1202,7 +1525,7 @@ void GUIChatConsole::updateScrollbar(bool update_size)
 	m_scrollbar->setMax(buf.getBottomScrollPos());
 	m_scrollbar->setPos(buf.getScrollPosition());
 	m_scrollbar->setPageSize(m_fontsize.Y * buf.getLineCount());
-	m_scrollbar->setVisible(m_scrollbar->getMin() != m_scrollbar->getMax());
+	m_scrollbar->setVisible(!m_modern && m_scrollbar->getMin() != m_scrollbar->getMax());
 
 	if (update_size) {
 		const core::rect<s32> rect (m_screensize.X - getScrollbarSize(Environment), 0, m_screensize.X, m_height);
