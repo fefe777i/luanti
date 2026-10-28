@@ -958,6 +958,10 @@ console_alpha (Console alpha) int 200 0 255
 # If disabled, the classic console is used.
 chat_modern_ui (Modern chat window) bool true
 
+# Height of the chat window (fraction of the screen) while the on-screen
+# keyboard is shown. Make it smaller if the keyboard covers the input field.
+chat_keyboard_height (Chat height with keyboard) float 0.33 0.2 0.7
+
 #    Optional override for chat weblink color.
 chat_weblink_color (Weblink color) string #8888FF
 

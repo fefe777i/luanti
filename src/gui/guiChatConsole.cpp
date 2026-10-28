@@ -140,7 +140,8 @@ void GUIChatConsole::setKeyboardActive(bool on)
 	if (!m_soft_keyboard_mode)
 		return;
 	m_ime_active = on;
-	m_desired_height_fraction = on ? 0.4f : 1.0f;
+	m_desired_height_fraction = on ?
+			rangelim(g_settings->getFloat("chat_keyboard_height"), 0.2f, 0.7f) : 1.0f;
 	m_desired_height = m_desired_height_fraction * m_screensize.Y;
 	m_height = m_desired_height;
 	reformatConsole();
@@ -1101,11 +1102,12 @@ bool GUIChatConsole::pointerMove(s32 x, s32 y)
 	}
 	if (m_press == Press::Scrolling) {
 		// The text follows the finger: moving down shows older lines
+		// (scroll() with a negative number goes back in time)
 		const s32 fh = std::max<s32>(1, m_fontsize.Y);
-		const s32 rows = (y - m_scroll_y) / fh;
+		const s32 rows = (m_scroll_y - y) / fh;
 		if (rows != 0) {
 			m_chat_backend->scroll(rows);
-			m_scroll_y += rows * fh;
+			m_scroll_y -= rows * fh;
 		}
 		return true;
 	}
