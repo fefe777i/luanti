@@ -1619,9 +1619,16 @@ void Game::openConsole(float scale, const wchar_t *line)
 
 #ifdef __ANDROID__
 	if (!porting::hasPhysicalKeyboardAndroid()) {
-		porting::showTextInputDialog("", "", 2);
-		m_android_chat_open = true;
-	} else {
+		if (!g_settings->getBool("chat_modern_ui")) {
+			// Classic behavior: system text input dialog
+			porting::showTextInputDialog("", "", 2);
+			m_android_chat_open = true;
+			return;
+		}
+		// The chat window is shown in the upper part of the screen, above
+		// the on-screen keyboard (which covers about the lower half).
+		scale = 0.4f;
+	}
 #endif
 	if (gui_chat_console->isOpenInhibited())
 		return;
@@ -1630,9 +1637,6 @@ void Game::openConsole(float scale, const wchar_t *line)
 		gui_chat_console->setCloseOnEnter(true);
 		gui_chat_console->replaceAndAddToHistory(line);
 	}
-#ifdef __ANDROID__
-	} // else
-#endif
 }
 
 #ifdef __ANDROID__
