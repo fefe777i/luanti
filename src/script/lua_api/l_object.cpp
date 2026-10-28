@@ -704,12 +704,63 @@ int ObjectRef::l_set_camera(lua_State *L)
 
 	if (lua_isnoneornil(L, 2)) {
 		player->allowed_camera_mode = CAMERA_MODE_ANY;
+		player->rts_camera = RtsCameraParams();
 	} else {
 		luaL_checktype(L, 2, LUA_TTABLE);
 
 		lua_getfield(L, -1, "mode");
 		if (lua_isstring(L, -1))
 			string_to_enum(es_CameraMode, player->allowed_camera_mode, lua_tostring(L, -1));
+		lua_pop(L, 1);
+
+		// rts = false | { min = {x=,z=}, max = {x=,z=}, pitch=, yaw=,
+		//                 dist_min=, dist_max= }
+		lua_getfield(L, -1, "rts");
+		if (lua_isboolean(L, -1) || lua_isnil(L, -1)) {
+			if (lua_isboolean(L, -1) && !lua_toboolean(L, -1))
+				player->rts_camera = RtsCameraParams();
+		} else if (lua_istable(L, -1)) {
+			RtsCameraParams rts; // defaults for everything not given
+			rts.enabled = true;
+			int t = lua_gettop(L);
+
+			auto read_xz = [&](const char *field, f32 &x, f32 &z) {
+				lua_getfield(L, t, field);
+				if (lua_istable(L, -1)) {
+					lua_getfield(L, -1, "x");
+					if (lua_isnumber(L, -1))
+						x = lua_tonumber(L, -1);
+					lua_pop(L, 1);
+					lua_getfield(L, -1, "z");
+					if (lua_isnumber(L, -1))
+						z = lua_tonumber(L, -1);
+					lua_pop(L, 1);
+				}
+				lua_pop(L, 1);
+			};
+			auto read_num = [&](const char *field, f32 &v) {
+				lua_getfield(L, t, field);
+				if (lua_isnumber(L, -1))
+					v = lua_tonumber(L, -1);
+				lua_pop(L, 1);
+			};
+
+			read_xz("min", rts.min_x, rts.min_z);
+			read_xz("max", rts.max_x, rts.max_z);
+			read_num("pitch", rts.pitch);
+			read_num("yaw", rts.yaw);
+			read_num("dist_min", rts.dist_min);
+			read_num("dist_max", rts.dist_max);
+
+			rts.pitch = rangelim(rts.pitch, 15.0f, 90.0f);
+			rts.dist_min = MYMAX(rts.dist_min, 2.0f);
+			rts.dist_max = MYMAX(rts.dist_max, rts.dist_min);
+			if (rts.max_x < rts.min_x)
+				std::swap(rts.max_x, rts.min_x);
+			if (rts.max_z < rts.min_z)
+				std::swap(rts.max_z, rts.min_z);
+			player->rts_camera = rts;
+		}
 		lua_pop(L, 1);
 	}
 
@@ -727,6 +778,24 @@ int ObjectRef::l_get_camera(lua_State *L)
 
 	lua_newtable(L);
 	setstringfield(L, -1, "mode", enum_to_string(es_CameraMode, player->allowed_camera_mode));
+
+	const RtsCameraParams &rts = player->rts_camera;
+	if (rts.enabled) {
+		lua_newtable(L);
+		lua_newtable(L);
+		setfloatfield(L, -1, "x", rts.min_x);
+		setfloatfield(L, -1, "z", rts.min_z);
+		lua_setfield(L, -2, "min");
+		lua_newtable(L);
+		setfloatfield(L, -1, "x", rts.max_x);
+		setfloatfield(L, -1, "z", rts.max_z);
+		lua_setfield(L, -2, "max");
+		setfloatfield(L, -1, "pitch", rts.pitch);
+		setfloatfield(L, -1, "yaw", rts.yaw);
+		setfloatfield(L, -1, "dist_min", rts.dist_min);
+		setfloatfield(L, -1, "dist_max", rts.dist_max);
+		lua_setfield(L, -2, "rts");
+	}
 
 	return 1;
 }

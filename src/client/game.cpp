@@ -562,6 +562,7 @@ void Game::run()
 		processUserInput(dtime);
 		// Update camera before player movement to avoid camera lag of one frame
 		updateCameraDirection(&cam_view_target, dtime);
+		updateRtsCamera(dtime, &cam_view_target, &cam_view);
 		if (m_cache_cam_smoothing <= 0.0f) {
 			cam_view.camera_yaw = cam_view_target.camera_yaw;
 			cam_view.camera_pitch = cam_view_target.camera_pitch;
@@ -1625,8 +1626,9 @@ void Game::openConsole(float scale, const wchar_t *line)
 			m_android_chat_open = true;
 			return;
 		}
-		// The chat window uses the whole screen and gets smaller while the
-		// on-screen keyboard is shown (see GUIChatConsole).
+		// The chat window is shown in the upper part of the screen, above
+		// the on-screen keyboard (which covers about the lower half).
+		scale = 0.4f;
 	}
 #endif
 	if (gui_chat_console->isOpenInhibited())
@@ -2006,6 +2008,135 @@ bool Game::isTouchShootlineUsed() const
 {
 	return g_touchcontrols && g_touchcontrols->isShootlineAvailable() &&
 			camera->getCameraMode() == CAMERA_MODE_FIRST;
+}
+
+void Game::updateRtsCamera(f32 dtime, CameraOrientation *target, CameraOrientation *view)
+{
+	LocalPlayer *player = client->getEnv().getLocalPlayer();
+	const RtsCameraParams &rts = player->rts_camera;
+
+	if (!rts.enabled) {
+		if (m_rts_active) {
+			m_rts_active = false;
+			if (g_touchcontrols)
+				g_touchcontrols->setRtsMode(false);
+		}
+		return;
+	}
+
+	if (!m_rts_active) {
+		// start at the current player position
+		m_rts_active = true;
+		m_rts_focus = player->getPosition();
+		m_rts_dist = (rts.dist_min + rts.dist_max) * 0.5f;
+		m_rts_vel = v2f(0.0f, 0.0f);
+		if (g_touchcontrols)
+			g_touchcontrols->setRtsMode(true);
+	}
+
+	// Only the first person view can look down from above
+	if (camera->getCameraMode() != CAMERA_MODE_FIRST) {
+		camera->setCameraMode(CAMERA_MODE_FIRST);
+		updateCameraMode();
+	}
+
+	// Fixed orientation: ignore whatever the view code accumulated
+	target->camera_yaw = rts.yaw;
+	target->camera_pitch = rts.pitch;
+	view->camera_yaw = rts.yaw;
+	view->camera_pitch = rts.pitch;
+
+	const f32 yaw_rad = rts.yaw * core::DEGTORAD;
+	const f32 pitch_rad = rts.pitch * core::DEGTORAD;
+	const v2f fwd(-std::sin(yaw_rad), std::cos(yaw_rad)); // horizontal look direction
+	const v2f right(fwd.Y, -fwd.X);
+
+	// Input: how far the focus has to move (nodes) and how much to zoom
+	v2f pan_world(0.0f, 0.0f);
+	f32 zoom_mul = 1.0f;
+
+	if (g_touchcontrols) {
+		const v2f px = g_touchcontrols->getRtsPan();
+		zoom_mul = g_touchcontrols->getRtsZoomMul();
+
+		// size of one screen pixel on the ground, in nodes
+		const f32 screen_h = std::max(1.0f, (f32)driver->getScreenSize().Height);
+		const f32 nodes_per_px = 2.0f * m_rts_dist * std::tan(camera->getFovY() * 0.5f) / screen_h;
+
+		// dragging the finger right moves the camera left, dragging it down
+		// moves the camera "up" the screen, i.e. forward (foreshortened by pitch)
+		pan_world = right * (-px.X * nodes_per_px) +
+				fwd * (px.Y * nodes_per_px / std::max(0.2f, std::sin(pitch_rad)));
+	} else {
+		// keyboard (testing on desktop): movement keys pan, jump/sneak zoom
+		const f32 speed = 0.8f * m_rts_dist * dtime;
+		pan_world = fwd * ((getAxisValue(KeyType::FORWARD) - getAxisValue(KeyType::BACKWARD)) * speed) +
+				right * ((getAxisValue(KeyType::RIGHT) - getAxisValue(KeyType::LEFT)) * speed);
+		if (isKeyDown(KeyType::JUMP))
+			zoom_mul *= std::exp(-1.5f * dtime);
+		if (isKeyDown(KeyType::SNEAK))
+			zoom_mul *= std::exp(1.5f * dtime);
+	}
+
+	// Pan with a little inertia, so that a flick keeps gliding for a moment
+	if (pan_world.getLengthSQ() > 0.0f && dtime > 0.0f) {
+		v2f v = pan_world / dtime;
+		const f32 vmax = 120.0f; // nodes per second
+		if (v.getLength() > vmax)
+			v *= vmax / v.getLength();
+		m_rts_vel = m_rts_vel * 0.5f + v * 0.5f;
+	} else {
+		m_rts_vel *= std::exp(-6.0f * dtime);
+		if (m_rts_vel.getLengthSQ() < 0.01f)
+			m_rts_vel = v2f(0.0f, 0.0f);
+		pan_world = m_rts_vel * dtime;
+	}
+
+	m_rts_focus.X += pan_world.X * BS;
+	m_rts_focus.Z += pan_world.Y * BS;
+	m_rts_dist = rangelim(m_rts_dist * zoom_mul, rts.dist_min, rts.dist_max);
+
+	// Keep the focus inside the allowed rectangle
+	m_rts_focus.X = rangelim(m_rts_focus.X, rts.min_x * BS, rts.max_x * BS);
+	m_rts_focus.Z = rangelim(m_rts_focus.Z, rts.min_z * BS, rts.max_z * BS);
+
+	// Follow the terrain: look for the topmost solid node below the focus.
+	{
+		ClientMap &map = client->getEnv().getClientMap();
+		const NodeDefManager *ndef = client->ndef();
+		const s16 fx = floorf(m_rts_focus.X / BS + 0.5f);
+		const s16 fz = floorf(m_rts_focus.Z / BS + 0.5f);
+		const s16 y_top = floorf(m_rts_focus.Y / BS + 0.5f) + 24;
+		const s16 y_bottom = y_top - 80;
+		bool found = false;
+		f32 ground_y = m_rts_focus.Y;
+		for (s16 y = y_top; y >= y_bottom; y--) {
+			bool ok = false;
+			MapNode n = map.getNode(v3s16(fx, y, fz), &ok);
+			if (!ok || n.getContent() == CONTENT_IGNORE)
+				continue;
+			const ContentFeatures &f = ndef->get(n);
+			if (f.walkable || f.isLiquid()) {
+				ground_y = (y + 0.5f) * BS;
+				found = true;
+				break;
+			}
+		}
+		if (found) {
+			const f32 k = 1.0f - std::exp(-8.0f * dtime);
+			m_rts_focus.Y += (ground_y - m_rts_focus.Y) * k;
+		}
+	}
+
+	// Camera sits behind and above the focus, looking at it
+	const f32 dist = m_rts_dist * BS;
+	v3f eye(
+		m_rts_focus.X - fwd.X * std::cos(pitch_rad) * dist,
+		m_rts_focus.Y + std::sin(pitch_rad) * dist,
+		m_rts_focus.Z - fwd.Y * std::cos(pitch_rad) * dist);
+
+	player->setPosition(eye - player->getEyeOffset());
+	player->setSpeed(v3f(0.0f));
 }
 
 void Game::updateCameraOrientation(CameraOrientation *cam, float dtime)

@@ -642,6 +642,7 @@ bool PlayerSAO::checkMovementCheat()
 
 	if (m_is_singleplayer ||
 			isAttached() ||
+			m_player->rts_camera.enabled || // the client pans the camera freely
 			!(anticheat_flags & AC_MOVEMENT)) {
 		m_last_good_position = getBasePosition();
 		return false;

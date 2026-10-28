@@ -1612,6 +1612,21 @@ void Client::handleCommand_Camera(NetworkPacket* pkt)
 	if (player->allowed_camera_mode >= CameraMode_END)
 		player->allowed_camera_mode = CAMERA_MODE_ANY;
 
+	RtsCameraParams rts;
+	if (pkt->hasRemainingBytes()) {
+		u8 rts_enabled = 0;
+		*pkt >> rts_enabled;
+		if (rts_enabled) {
+			rts.enabled = true;
+			*pkt >> rts.min_x >> rts.min_z >> rts.max_x >> rts.max_z
+					>> rts.pitch >> rts.yaw >> rts.dist_min >> rts.dist_max;
+			rts.pitch = rangelim(rts.pitch, 15.0f, 90.0f);
+			rts.dist_min = MYMAX(rts.dist_min, 2.0f);
+			rts.dist_max = MYMAX(rts.dist_max, rts.dist_min);
+		}
+	}
+	player->rts_camera = rts;
+
 	m_client_event_queue.push(new ClientEvent(CE_UPDATE_CAMERA));
 }
 

@@ -211,6 +211,12 @@ bool LocalPlayer::updateSneakNode(Map *map, const v3f &position,
 void LocalPlayer::move(f32 dtime, Environment *env,
 		std::vector<CollisionInfo> *collision_info)
 {
+	// The RTS camera moves the player directly (see Game::updateRtsCamera)
+	if (rts_camera.enabled) {
+		setSpeed(v3f(0.0f));
+		return;
+	}
+
 	// Node at feet position, update each ClientEnvironment::step()
 	if (!collision_info || collision_info->empty())
 		m_standing_node = floatToInt(m_position, BS);
@@ -542,7 +548,8 @@ void LocalPlayer::applyControl(float dtime, Environment *env)
 	setYaw(control.yaw);
 
 	// Nullify speed and don't run positioning code if the player is attached
-	if (getParent()) {
+	// or controlled by the RTS camera
+	if (getParent() || rts_camera.enabled) {
 		setSpeed(v3f(0.0f));
 		return;
 	}

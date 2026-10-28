@@ -9560,6 +9560,19 @@ You **must not** mix names and track numbers to refer to the same animation.
       - `first`: first-person camera
       - `third`: third-person camera
       - `third_front`: third-person camera, looking opposite of movement direction
+    * `rts`: `false` or a table, enables/disables the top-down RTS camera
+      (this fork only). While enabled the client moves the player itself:
+      a finger (or the mouse) drags the camera over the map, two fingers
+      zoom, the touch joystick and buttons are hidden and the movement
+      anti-cheat is skipped for this player. All fields are optional:
+      - `min = {x=, z=}`, `max = {x=, z=}`: the camera focus is kept inside
+        this rectangle (node coordinates)
+      - `pitch`: angle below the horizon in degrees (15..90, default 60)
+      - `yaw`: look direction in degrees (default 0, same as `set_look_horizontal`)
+      - `dist_min`, `dist_max`: closest and farthest zoom distance in nodes
+        (defaults 10 and 60)
+      The focus starts at the player's position when the mode is enabled.
+      Remember to restore the position (`set_pos`) when disabling it.
     * Supported by clients since 5.12.0.
 * `get_camera()`: Returns the camera parameters as a table as above.
 * `send_mapblock(blockpos)`:

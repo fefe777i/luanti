@@ -156,6 +156,23 @@ enum CameraMode : int {
 
 extern const struct EnumString es_CameraMode[];
 
+/*
+	Top-down "RTS" camera parameters.
+	Sent by the server (ObjectRef:set_camera({rts = {...}})). While enabled the
+	client drives the player position itself: fingers (touch) or the mouse pan
+	the camera over the map, bounded by min/max. Units are nodes / degrees.
+*/
+struct RtsCameraParams
+{
+	bool enabled = false;
+	f32 min_x = -31000.0f, min_z = -31000.0f;
+	f32 max_x = 31000.0f, max_z = 31000.0f;
+	f32 pitch = 60.0f;     // looking down, degrees below the horizon
+	f32 yaw = 0.0f;        // degrees, same convention as player look yaw
+	f32 dist_min = 10.0f;  // closest zoom (distance camera <-> ground focus)
+	f32 dist_max = 60.0f;  // farthest zoom
+};
+
 class Player
 {
 public:
@@ -177,6 +194,7 @@ public:
 	const std::string& getName() const { return m_name; }
 
 	CameraMode allowed_camera_mode = CAMERA_MODE_ANY;
+	RtsCameraParams rts_camera;
 
 	v3f eye_offset_first;
 	v3f eye_offset_third;

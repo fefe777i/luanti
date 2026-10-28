@@ -92,6 +92,30 @@ public:
 	bool isShootlineAvailable() { return m_interaction_style == TAP; }
 
 	/**
+	 * RTS camera mode (top-down camera): the joystick and all buttons are
+	 * hidden, one finger pans the camera, two fingers zoom, taps still work.
+	 */
+	void setRtsMode(bool enabled);
+	bool isRtsMode() const { return m_rts_mode; }
+
+	// Accumulated finger movement in pixels since the last call.
+	v2f getRtsPan()
+	{
+		v2f res = m_rts_pan;
+		m_rts_pan = v2f(0.0f, 0.0f);
+		return res;
+	}
+
+	// Accumulated pinch factor since the last call:
+	// < 1 means the fingers moved apart (zoom in), > 1 means together (zoom out).
+	f32 getRtsZoomMul()
+	{
+		f32 res = m_rts_zoom_mul;
+		m_rts_zoom_mul = 1.0f;
+		return res;
+	}
+
+	/**
 	 * Returns a line which describes what the player is pointing at.
 	 * The starting point and looking direction are significant,
 	 * the line should be scaled to match its length to the actual distance
@@ -176,6 +200,14 @@ private:
 	// than one client step, i.e. press and release happen in the same step.
 	bool m_had_move_id = false;
 	bool m_move_prevent_short_tap = false;
+
+	// RTS camera mode
+	bool m_rts_mode = false;
+	v2f m_rts_pan = v2f(0.0f, 0.0f);
+	f32 m_rts_zoom_mul = 1.0f;
+	bool m_has_rts_second = false; // second finger of a pinch (first is m_move_id)
+	size_t m_rts_second_id = 0;
+	void rtsPointerMoved(size_t id, const v2s32 &prev, const v2s32 &now);
 
 	bool m_has_joystick_id = false;
 	size_t m_joystick_id;

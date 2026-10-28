@@ -179,6 +179,8 @@ protected:
 	void checkZoomEnabled();
 
 	void updateCameraDirection(CameraOrientation *cam, float dtime);
+	// Top-down RTS camera (see RtsCameraParams). Moves the local player.
+	void updateRtsCamera(f32 dtime, CameraOrientation *target, CameraOrientation *view);
 	void updateCameraOrientation(CameraOrientation *cam, float dtime);
 	bool getTogglableKeyState(GameKeyType key, bool toggling_enabled, bool prev_key_state);
 	void updatePlayerControl(const CameraOrientation &cam);
@@ -382,6 +384,12 @@ private:
 	bool m_invert_hotbar_mouse_wheel;
 
 	bool m_first_loop_after_window_activation = false;
+
+	// RTS camera state
+	bool m_rts_active = false;
+	v3f m_rts_focus;            // point on the ground the camera looks at (BS-space)
+	f32 m_rts_dist = 30.0f;     // distance camera <-> focus, in nodes
+	v2f m_rts_vel;              // pan inertia, nodes per second
 	bool m_camera_offset_changed = false;
 	bool m_game_focused = false;
 

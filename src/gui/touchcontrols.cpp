@@ -217,6 +217,10 @@ void TouchControls::readSettings()
 		warningstream << "Invalid touch_interaction_style value" << std::endl;
 	}
 
+	// Taps must work in the RTS camera whatever the user's style is
+	if (m_rts_mode)
+		m_interaction_style = TAP;
+
 	m_touchscreen_threshold = g_settings->getU16("touchscreen_threshold");
 	m_long_tap_delay = g_settings->getU16("touch_long_tap_delay");
 	m_fixed_joystick = g_settings->getBool("fixed_virtual_joystick");
@@ -424,7 +428,21 @@ void TouchControls::handleReleaseEvent(size_t pointer_id)
 	if (buttonsHandleRelease(m_overflow_buttons, pointer_id))
 		return;
 
-	if (m_has_move_id && pointer_id == m_move_id) {
+	if (m_has_move_id && pointer_id == m_move_id && m_rts_mode && m_has_rts_second) {
+		// The first finger of a pinch was lifted: the second one carries on
+		// panning, but it must never count as a tap.
+		m_move_id = m_rts_second_id;
+		m_has_rts_second = false;
+		m_move_has_really_moved = true;
+		m_move_prevent_short_tap = true;
+		m_tap_state = TapState::None;
+	}
+
+	else if (m_has_rts_second && pointer_id == m_rts_second_id) {
+		m_has_rts_second = false;
+	}
+
+	else if (m_has_move_id && pointer_id == m_move_id) {
 		// handle the point used for moving view
 		m_has_move_id = false;
 
@@ -529,8 +547,8 @@ void TouchControls::translateEvent(const SEvent &event)
 
 		// Select joystick when joystick tapped (fixed joystick position) or
 		// when left 1/3 of screen dragged (free joystick position)
-		if ((m_fixed_joystick && dir_fixed.getLengthSQ() <= fixed_joystick_range_sq) ||
-				(!m_fixed_joystick && X < m_screensize.X / 3.0f)) {
+		if (!m_rts_mode && ((m_fixed_joystick && dir_fixed.getLengthSQ() <= fixed_joystick_range_sq) ||
+				(!m_fixed_joystick && X < m_screensize.X / 3.0f))) {
 			// If we don't already have a starting point for joystick, make this the one.
 			if (!m_has_joystick_id) {
 				m_has_joystick_id           = true;
@@ -547,6 +565,13 @@ void TouchControls::translateEvent(const SEvent &event)
 				m_joystick_btn_center->setRelativePosition(
 						touch_pos - half_button_size);
 			}
+		} else if (m_rts_mode && m_has_move_id && !m_has_rts_second) {
+			// Second finger: pinch zoom. Cancel any tap of the first finger.
+			m_has_rts_second = true;
+			m_rts_second_id = pointer_id;
+			m_move_has_really_moved = true;
+			m_move_prevent_short_tap = true;
+			m_tap_state = TapState::None;
 		} else {
 			// If we don't already have a moving point, make this the moving one.
 			if (!m_has_move_id) {
@@ -583,14 +608,24 @@ void TouchControls::translateEvent(const SEvent &event)
 			m_move_pos = touch_pos;
 			m_pointer_pos[event.TouchInput.ID] = touch_pos;
 
-			// update camera_yaw and camera_pitch
-			const double d = g_settings->getFloat("touchscreen_sensitivity", 0.001f, 10.0f)
-					* 6.0f / RenderingEngine::getDisplayDensity();
-			m_camera_yaw_change -= dir_free.X * d;
-			m_camera_pitch_change += dir_free.Y * d;
-
 			if (dir_free_original.getLengthSQ() > touch_threshold_sq)
 				m_move_has_really_moved = true;
+
+			if (m_rts_mode) {
+				// pan the RTS camera instead of turning the view
+				rtsPointerMoved(event.TouchInput.ID, free_joystick_center, touch_pos);
+			} else {
+				// update camera_yaw and camera_pitch
+				const double d = g_settings->getFloat("touchscreen_sensitivity", 0.001f, 10.0f)
+						* 6.0f / RenderingEngine::getDisplayDensity();
+				m_camera_yaw_change -= dir_free.X * d;
+				m_camera_pitch_change += dir_free.Y * d;
+			}
+		}
+
+		if (m_rts_mode && m_has_rts_second && event.TouchInput.ID == m_rts_second_id) {
+			m_pointer_pos[event.TouchInput.ID] = touch_pos;
+			rtsPointerMoved(event.TouchInput.ID, free_joystick_center, touch_pos);
 		}
 
 		if (m_has_joystick_id && event.TouchInput.ID == m_joystick_id) {
@@ -635,6 +670,56 @@ void TouchControls::translateEvent(const SEvent &event)
 			}
 		}
 	}
+}
+
+void TouchControls::rtsPointerMoved(size_t id, const v2s32 &prev, const v2s32 &now)
+{
+	const v2f a_old((f32)prev.X, (f32)prev.Y);
+	const v2f a_new((f32)now.X, (f32)now.Y);
+
+	if (!m_has_rts_second) {
+		// One finger: drag the map, but only once the finger has really moved,
+		// so that jittery taps do not shake the camera.
+		if (m_move_has_really_moved)
+			m_rts_pan += a_new - a_old;
+		return;
+	}
+
+	// Two fingers: pinch to zoom and drag with the midpoint.
+	const size_t other_id = (id == m_move_id) ? m_rts_second_id : m_move_id;
+	auto it = m_pointer_pos.find(other_id);
+	if (it == m_pointer_pos.end())
+		return;
+	const v2f other((f32)it->second.X, (f32)it->second.Y);
+
+	const f32 d_old = a_old.getDistanceFrom(other);
+	const f32 d_new = a_new.getDistanceFrom(other);
+	if (d_old > 8.0f && d_new > 8.0f)
+		m_rts_zoom_mul *= d_old / d_new;
+
+	m_rts_pan += (a_new - a_old) * 0.5f;
+}
+
+void TouchControls::setRtsMode(bool enabled)
+{
+	if (m_rts_mode == enabled)
+		return;
+
+	releaseAll();
+	m_rts_mode = enabled;
+	m_has_rts_second = false;
+	m_rts_pan = v2f(0.0f, 0.0f);
+	m_rts_zoom_mul = 1.0f;
+	m_overflow_open = false;
+	m_has_move_id = false;
+	m_tap_state = TapState::None;
+
+	if (enabled)
+		m_interaction_style = TAP;
+	else
+		readSettings(); // restores the user's interaction style (and the layout)
+
+	updateVisibility();
 }
 
 void TouchControls::applyJoystickStatus()
@@ -734,7 +819,7 @@ void TouchControls::toggleOverflowMenu()
 
 void TouchControls::updateVisibility()
 {
-	bool regular_visible = m_visible && !m_overflow_open;
+	bool regular_visible = m_visible && !m_overflow_open && !m_rts_mode;
 	for (auto &button : m_buttons)
 		button.gui_button->setVisible(regular_visible);
 	m_overflow_btn->setVisible(regular_visible);
@@ -743,7 +828,7 @@ void TouchControls::updateVisibility()
 	m_joystick_btn_bg->setVisible(regular_visible && m_has_joystick_id);
 	m_joystick_btn_center->setVisible(regular_visible && m_has_joystick_id);
 
-	bool overflow_visible = m_visible && m_overflow_open;
+	bool overflow_visible = m_visible && m_overflow_open && !m_rts_mode;
 	m_overflow_bg->setVisible(overflow_visible);
 	for (auto &button : m_overflow_buttons)
 		button.gui_button->setVisible(overflow_visible);

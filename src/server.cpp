@@ -2091,6 +2091,14 @@ void Server::SendCamera(session_t peer_id, Player *player)
 
 	pkt << static_cast<u8>(player->allowed_camera_mode);
 
+	// Optional trailing RTS camera block (older clients simply ignore it)
+	const RtsCameraParams &rts = player->rts_camera;
+	pkt << static_cast<u8>(rts.enabled ? 1 : 0);
+	if (rts.enabled) {
+		pkt << rts.min_x << rts.min_z << rts.max_x << rts.max_z
+				<< rts.pitch << rts.yaw << rts.dist_min << rts.dist_max;
+	}
+
 	Send(&pkt);
 }
 
