@@ -65,7 +65,8 @@ public:
 
 	virtual void setVisible(bool visible);
 
-	virtual bool acceptsIME() { return true; }
+	virtual bool acceptsIME() { return m_ime_active; }
+	virtual bool acceptsScreenKeyboard() { return m_soft_keyboard_mode; }
 
 private:
 	void reformatConsole();
@@ -108,6 +109,12 @@ private:
 	void sendPrompt();
 
 	bool m_modern = true;
+	// Touch devices without keyboard: the chat window fills the screen and
+	// shrinks to make room for the keyboard while the input field is used.
+	bool m_soft_keyboard_mode = false;
+	bool m_ime_active = true;   // text input (and keyboard) is on
+	bool m_input_pressed = false;
+	void setKeyboardActive(bool on);
 	u64 m_prev_total_added = 0;
 	u32 m_unseen = 0; // messages that arrived while scrolled up
 

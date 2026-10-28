@@ -684,6 +684,13 @@ public:
 		return false;
 	}
 
+	//! Returns whether the on-screen keyboard (Android) should be shown
+	//! while this element takes input from the IME
+	virtual bool acceptsScreenKeyboard()
+	{
+		return false;
+	}
+
 protected:
 	// not virtual because needed in constructor
 	void addChildToEnd(IGUIElement *child)

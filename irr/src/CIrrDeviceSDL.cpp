@@ -381,6 +381,12 @@ void CIrrDeviceSDL::resetReceiveTextInputEvents()
 #else
 			SDL_SetTextInputRect(&rect);
 #endif
+#if defined(__ANDROID__)
+			// Minetest does its own screen keyboard handling, except for
+			// elements that ask for the system keyboard (the chat window).
+			SDL_SetHint(SDL_HINT_ENABLE_SCREEN_KEYBOARD,
+					elem->acceptsScreenKeyboard() ? "1" : "0");
+#endif
 			SDL_StartTextInput(Window);
 		}
 	} else {

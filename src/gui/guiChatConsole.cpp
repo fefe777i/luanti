@@ -8,6 +8,9 @@
 #include "client/keycode.h"
 #include "settings.h"
 #include "porting.h"
+#ifdef __ANDROID__
+#include "porting_android.h"
+#endif
 #include "client/texturesource.h"
 #include "client/fontengine.h"
 #include "log.h"
@@ -57,6 +60,12 @@ GUIChatConsole::GUIChatConsole(
 {
 	s_instance = this;
 	m_modern = g_settings->getBool("chat_modern_ui");
+#ifdef __ANDROID__
+	if (m_modern && !porting::hasPhysicalKeyboardAndroid()) {
+		m_soft_keyboard_mode = true;
+		m_ime_active = false;
+	}
+#endif
 
 	// load background settings
 	s32 console_alpha = g_settings->getS32("console_alpha");
@@ -109,6 +118,11 @@ void GUIChatConsole::openConsole(f32 scale)
 
 	assert(scale > 0.0f && scale <= 1.0f);
 
+	if (m_soft_keyboard_mode) {
+		scale = 1.0f; // no keyboard yet
+		m_ime_active = false;
+	}
+
 	m_open = true;
 
 	m_desired_height_fraction = scale;
@@ -120,6 +134,17 @@ void GUIChatConsole::openConsole(f32 scale)
 }
 
 GUIChatConsole *GUIChatConsole::s_instance = nullptr;
+
+void GUIChatConsole::setKeyboardActive(bool on)
+{
+	if (!m_soft_keyboard_mode)
+		return;
+	m_ime_active = on;
+	m_desired_height_fraction = on ? 0.4f : 1.0f;
+	m_desired_height = m_desired_height_fraction * m_screensize.Y;
+	m_height = m_desired_height;
+	reformatConsole();
+}
 
 GUIChatConsole::~GUIChatConsole()
 {
@@ -448,6 +473,7 @@ bool GUIChatConsole::buttonClick(s32 x, s32 y)
 	}
 	if (l.slash_btn.isPointInside(p)) {
 		m_chat_backend->getPrompt().input(L'/');
+		setKeyboardActive(true);
 		return true;
 	}
 	if (l.scroll_btn.getWidth() > 0 && l.scroll_btn.isPointInside(p)) {
@@ -1032,6 +1058,13 @@ bool GUIChatConsole::pointerDown(s32 x, s32 y, bool touch)
 	if (commandSuggestionClick(x, y))
 		return true;
 
+	// Tap on the input field: (re)start the keyboard when released
+	if (m_soft_keyboard_mode && getLayout().input.isPointInside(core::vector2di(x, y))) {
+		m_ime_active = false; // stop text input, so it can be started again
+		m_input_pressed = true;
+		return true;
+	}
+
 	if (!inTextArea(x, y))
 		return false;
 
@@ -1094,8 +1127,17 @@ bool GUIChatConsole::pointerMove(s32 x, s32 y)
 
 bool GUIChatConsole::pointerUp(s32 x, s32 y)
 {
+	if (m_input_pressed) {
+		m_input_pressed = false;
+		setKeyboardActive(true);
+		return true;
+	}
 	if (m_press != Press::None) {
-		m_press = Press::None; // a tap or the end of scrolling
+		// A tap on the messages hides the keyboard, scrolling does not
+		const bool tap = m_press == Press::Pending;
+		m_press = Press::None;
+		if (tap && m_soft_keyboard_mode && m_ime_active)
+			setKeyboardActive(false);
 		return true;
 	}
 	if (!m_sel_active)

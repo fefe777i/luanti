@@ -1625,9 +1625,8 @@ void Game::openConsole(float scale, const wchar_t *line)
 			m_android_chat_open = true;
 			return;
 		}
-		// The chat window is shown in the upper part of the screen, above
-		// the on-screen keyboard (which covers about the lower half).
-		scale = 0.4f;
+		// The chat window uses the whole screen and gets smaller while the
+		// on-screen keyboard is shown (see GUIChatConsole).
 	}
 #endif
 	if (gui_chat_console->isOpenInhibited())
