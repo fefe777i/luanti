@@ -69,6 +69,8 @@ local function main_button_handler(tabview, fields, name, tabdata)
 		gamedata.password   = fields.te_pwd or ""
 		gamedata.address     = SERVER_ADDRESS
 		gamedata.port        = SERVER_PORT
+		gamedata.mode        = "join"   -- без цього: "unknown start mode"
+		gamedata.selected_world = 0
 
 		core.settings:set("name", fields.te_name)
 

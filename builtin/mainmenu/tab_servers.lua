@@ -85,6 +85,7 @@ local function connect(tabdata)
 	gamedata.password = tabdata.pwd or ""
 	gamedata.address = address
 	gamedata.port = port
+	gamedata.mode = "join" -- без цього: "unknown start mode"
 	gamedata.selected_world = 0
 
 	core.settings:set("name", player_name)
