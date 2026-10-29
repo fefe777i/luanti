@@ -10,6 +10,7 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #define PLAYERNAME_SIZE 20
 
@@ -162,6 +163,19 @@ extern const struct EnumString es_CameraMode[];
 	client drives the player position itself: fingers (touch) or the mouse pan
 	the camera over the map, bounded by min/max. Units are nodes / degrees.
 */
+// A button of the RTS camera toolbar (drawn by the client, see TouchControls)
+struct RtsButton
+{
+	std::string name;   // sent back to the server when pressed
+	std::string image;  // texture (modifiers allowed)
+	bool action = false; // one-shot action: does not stay highlighted
+
+	bool operator==(const RtsButton &o) const
+	{
+		return name == o.name && image == o.image && action == o.action;
+	}
+};
+
 struct RtsCameraParams
 {
 	bool enabled = false;
@@ -171,6 +185,8 @@ struct RtsCameraParams
 	f32 yaw = 0.0f;        // degrees, same convention as player look yaw
 	f32 dist_min = 10.0f;  // closest zoom (distance camera <-> ground focus)
 	f32 dist_max = 60.0f;  // farthest zoom
+	std::vector<RtsButton> buttons; // toolbar
+	std::string active_button;      // highlighted button
 };
 
 class Player

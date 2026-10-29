@@ -752,6 +752,37 @@ int ObjectRef::l_set_camera(lua_State *L)
 			read_num("dist_min", rts.dist_min);
 			read_num("dist_max", rts.dist_max);
 
+			// toolbar: buttons = { {name=, image=, action=}, ... }, active = "name"
+			lua_getfield(L, t, "buttons");
+			if (lua_istable(L, -1)) {
+				const int n = lua_objlen(L, -1);
+				for (int i = 1; i <= n && rts.buttons.size() < 32; i++) {
+					lua_rawgeti(L, -1, i);
+					if (lua_istable(L, -1)) {
+						RtsButton b;
+						lua_getfield(L, -1, "name");
+						if (lua_isstring(L, -1))
+							b.name = lua_tostring(L, -1);
+						lua_pop(L, 1);
+						lua_getfield(L, -1, "image");
+						if (lua_isstring(L, -1))
+							b.image = lua_tostring(L, -1);
+						lua_pop(L, 1);
+						lua_getfield(L, -1, "action");
+						b.action = lua_toboolean(L, -1);
+						lua_pop(L, 1);
+						if (!b.name.empty() && b.name.size() <= 64 && b.image.size() <= 512)
+							rts.buttons.push_back(std::move(b));
+					}
+					lua_pop(L, 1);
+				}
+			}
+			lua_pop(L, 1);
+			lua_getfield(L, t, "active");
+			if (lua_isstring(L, -1))
+				rts.active_button = lua_tostring(L, -1);
+			lua_pop(L, 1);
+
 			rts.pitch = rangelim(rts.pitch, 15.0f, 90.0f);
 			rts.dist_min = MYMAX(rts.dist_min, 2.0f);
 			rts.dist_max = MYMAX(rts.dist_max, rts.dist_min);

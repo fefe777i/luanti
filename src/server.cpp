@@ -2097,6 +2097,10 @@ void Server::SendCamera(session_t peer_id, Player *player)
 	if (rts.enabled) {
 		pkt << rts.min_x << rts.min_z << rts.max_x << rts.max_z
 				<< rts.pitch << rts.yaw << rts.dist_min << rts.dist_max;
+		pkt << static_cast<u8>(rts.buttons.size());
+		for (const RtsButton &b : rts.buttons)
+			pkt << b.name << b.image << static_cast<u8>(b.action ? 1 : 0);
+		pkt << rts.active_button;
 	}
 
 	Send(&pkt);

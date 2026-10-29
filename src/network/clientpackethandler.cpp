@@ -1623,6 +1623,20 @@ void Client::handleCommand_Camera(NetworkPacket* pkt)
 			rts.pitch = rangelim(rts.pitch, 15.0f, 90.0f);
 			rts.dist_min = MYMAX(rts.dist_min, 2.0f);
 			rts.dist_max = MYMAX(rts.dist_max, rts.dist_min);
+
+			if (pkt->hasRemainingBytes()) {
+				u8 count = 0;
+				*pkt >> count;
+				for (u8 i = 0; i < count && i < 32; i++) {
+					RtsButton b;
+					u8 action = 0;
+					*pkt >> b.name >> b.image >> action;
+					b.action = action != 0;
+					if (b.name.size() <= 64 && b.image.size() <= 512)
+						rts.buttons.push_back(std::move(b));
+				}
+				*pkt >> rts.active_button;
+			}
 		}
 	}
 	player->rts_camera = rts;

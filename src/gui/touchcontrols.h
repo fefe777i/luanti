@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "itemdef.h"
+#include "player.h" // RtsButton
 #include "touchscreenlayout.h"
 #include "util/basic_macros.h"
 #include "client/keycode.h"
@@ -97,6 +98,17 @@ public:
 	 */
 	void setRtsMode(bool enabled);
 	bool isRtsMode() const { return m_rts_mode; }
+
+	// Toolbar of the RTS camera. The buttons come from the server.
+	void setRtsButtons(const std::vector<RtsButton> &buttons, const std::string &active);
+
+	// Name of the toolbar button that was pressed, or nothing. Taken once.
+	std::optional<std::string> takeRtsButton()
+	{
+		auto res = m_rts_button_result;
+		m_rts_button_result.reset();
+		return res;
+	}
 
 	// Selection box (long press, then drag): the finished box in screen
 	// pixels, or nothing. Taken once.
@@ -217,6 +229,21 @@ private:
 	bool m_has_rts_second = false; // second finger of a pinch (first is m_move_id)
 	size_t m_rts_second_id = 0;
 	void rtsPointerMoved(size_t id, const v2s32 &prev, const v2s32 &now);
+
+	// RTS toolbar
+	struct RtsButtonGui
+	{
+		RtsButton def;
+		recti rect;
+		std::shared_ptr<IGUIImage> image;
+	};
+	std::vector<RtsButton> m_rts_button_defs;
+	std::vector<RtsButtonGui> m_rts_buttons;
+	std::string m_rts_active_button;
+	std::unordered_map<size_t, size_t> m_rts_button_pointers; // pointer id -> button
+	std::optional<std::string> m_rts_button_result;
+	void buildRtsButtons();
+	void refreshRtsButtonColors();
 
 	// RTS selection box
 	bool m_rts_box_active = false;

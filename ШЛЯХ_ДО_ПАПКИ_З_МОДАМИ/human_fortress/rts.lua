@@ -24,6 +24,7 @@ local function num_setting(key, default)
 end
 
 local active = {}      -- active[name] = { was_visible = bool }
+local params = {}      -- params[name] = таблиця rts, яку отримує рушій
 local rings = {}       -- rings[name][unit_id] = ObjectRef
 local unit_cache = {}  -- unit_id -> ObjectRef (щоб не шукати юніта за радіусом щоразу)
 
@@ -83,21 +84,46 @@ function RTS.enter(player, base_pos)
     local r = num_setting("human_fortress_rts_radius", 120)
     active[name] = { was_visible = player:get_properties().is_visible ~= false }
 
-    player:set_camera({
-        mode = "first",
-        rts = {
-            min = { x = base_pos.x - r, z = base_pos.z - r },
-            max = { x = base_pos.x + r, z = base_pos.z + r },
-            pitch = num_setting("human_fortress_rts_pitch", 62),
-            yaw = 0,
-            dist_min = num_setting("human_fortress_rts_dist_min", 12),
-            dist_max = num_setting("human_fortress_rts_dist_max", 55),
-        },
-    })
+    params[name] = {
+        min = { x = base_pos.x - r, z = base_pos.z - r },
+        max = { x = base_pos.x + r, z = base_pos.z + r },
+        pitch = num_setting("human_fortress_rts_pitch", 62),
+        yaw = 0,
+        dist_min = num_setting("human_fortress_rts_dist_min", 12),
+        dist_max = num_setting("human_fortress_rts_dist_max", 55),
+        buttons = {},
+        active = "",
+    }
+    player:set_camera({ mode = "first", rts = params[name] })
     -- без прицілу й предмета в руці: камера дивиться зверху
     player:hud_set_flags({ crosshair = false, wielditem = false })
     -- аватар висить у повітрі під камерою - ховаємо його від усіх
     player:set_properties({ is_visible = false })
+end
+
+--- Панель кнопок рушія. list = { {key=, icon=, action=bool}, ... }
+function RTS.set_buttons(player, list)
+    local name = player:get_player_name()
+    local p = params[name]
+    if not p then return false end
+    p.buttons = {}
+    for _, b in ipairs(list) do
+        p.buttons[#p.buttons + 1] = { name = b.key, image = b.icon, action = b.action and true or false }
+    end
+    player:set_camera({ mode = "first", rts = p })
+    return true
+end
+
+--- Підсвітити кнопку вибраного інструмента (nil - зняти підсвітку).
+function RTS.set_active(player, key)
+    local name = player:get_player_name()
+    local p = params[name]
+    if not p then return false end
+    key = key or ""
+    if p.active == key then return true end
+    p.active = key
+    player:set_camera({ mode = "first", rts = p })
+    return true
 end
 
 function RTS.exit(player)
@@ -105,6 +131,7 @@ function RTS.exit(player)
     local st = active[name]
     if not st then return end
     active[name] = nil
+    params[name] = nil
 
     RTS.clear_rings(name)
     player:set_camera({ mode = "any", rts = false })
@@ -468,4 +495,5 @@ minetest.register_on_leaveplayer(function(player)
     local name = player:get_player_name()
     RTS.clear_rings(name)
     active[name] = nil
+    params[name] = nil
 end)

@@ -2031,6 +2031,7 @@ void Game::updateRtsCamera(f32 dtime, CameraOrientation *target, CameraOrientati
 		m_rts_focus = player->getPosition();
 		m_rts_dist = (rts.dist_min + rts.dist_max) * 0.5f;
 		m_rts_vel = v2f(0.0f, 0.0f);
+		m_rts_buttons_valid = false;
 		if (g_touchcontrols)
 			g_touchcontrols->setRtsMode(true);
 	}
@@ -2059,6 +2060,20 @@ void Game::updateRtsCamera(f32 dtime, CameraOrientation *target, CameraOrientati
 	if (g_touchcontrols) {
 		if (auto box = g_touchcontrols->takeRtsBox())
 			sendRtsBox(box->first, box->second);
+
+		// toolbar: buttons come from the server, presses go back as a field
+		if (!m_rts_buttons_valid || rts.buttons != m_rts_buttons_applied ||
+				rts.active_button != m_rts_active_applied) {
+			g_touchcontrols->setRtsButtons(rts.buttons, rts.active_button);
+			m_rts_buttons_applied = rts.buttons;
+			m_rts_active_applied = rts.active_button;
+			m_rts_buttons_valid = true;
+		}
+		if (auto pressed = g_touchcontrols->takeRtsButton()) {
+			StringMap fields;
+			fields["rts_button"] = *pressed;
+			client->sendInventoryFields("", fields);
+		}
 
 		const v2f px = g_touchcontrols->getRtsPan();
 		zoom_mul = g_touchcontrols->getRtsZoomMul();

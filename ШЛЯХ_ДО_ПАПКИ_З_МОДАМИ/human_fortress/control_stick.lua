@@ -183,7 +183,22 @@ local BUTTON_LOOKUP = {}
 for _, b in ipairs(MAIN_BUTTONS) do BUTTON_LOOKUP[b.key] = b end
 for _, b in ipairs(BUILD_BUTTONS) do BUTTON_LOOKUP[b.key] = b end
 
+-- Кнопки-дії одноразові: вони не лишаються підсвіченими як вибраний інструмент
+local ACTION_KEYS = { deselect = true, exit = true, b_rotate = true, b_confirm = true, b_cancel = true }
+
+-- інструмент -> ключ кнопки (для підсвітки вибраного інструмента)
+local TOOL_KEY = {}
+for _, list in ipairs({ MAIN_BUTTONS, BUILD_BUTTONS }) do
+    for _, b in ipairs(list) do
+        if not ACTION_KEYS[b.key] then TOOL_KEY[b.tool] = b.key end
+    end
+end
+
 local function clear_hud_buttons(player)
+    if human_fortress.rts and human_fortress.rts.is_active(player:get_player_name()) then
+        human_fortress.rts.set_buttons(player, {})
+        return
+    end
     local name = player:get_player_name()
     local data = cmd_mode[name]
     if not data or not data.hud_buttons then return end
@@ -196,6 +211,18 @@ end
 local function show_hud_buttons(player, button_list)
     local name = player:get_player_name()
     if not cmd_mode[name] then return end
+
+    -- Кнопки рушія (великі, як кнопки керування) замість малих HUD-картинок
+    if human_fortress.rts and human_fortress.rts.is_active(name) then
+        local list = {}
+        for _, b in ipairs(button_list) do
+            list[#list + 1] = { key = b.key, icon = b.icon, action = ACTION_KEYS[b.key] or false }
+        end
+        human_fortress.rts.set_buttons(player, list)
+        return
+    end
+
+    -- запасний варіант: HUD-кнопки (клієнт без RTS-режиму)
     clear_hud_buttons(player)
     cmd_mode[name].hud_buttons = {}
 
@@ -225,11 +252,12 @@ local function select_tool(player, tool_name)
     local stack = ItemStack(tool_name .. " 1")
     stack:get_meta():set_float("range", CMD_REACH)
     inv:set_stack("main", idx, stack)
+    if human_fortress.rts then
+        human_fortress.rts.set_active(player, TOOL_KEY[tool_name])
+    end
 end
 
-core.register_on_hud_touch(function(player, hud_element_name)
-    local key = hud_element_name:match("^hf_btn_(.+)$")
-    if not key then return end
+local function handle_button(player, key)
     local b = BUTTON_LOOKUP[key]
     if not b then return end
 
@@ -269,6 +297,19 @@ core.register_on_hud_touch(function(player, hud_element_name)
 
     select_tool(player, b.tool)
     minetest.chat_send_player(name, "🎯 Вибрано: " .. key .. " — тапни по цілі на екрані")
+end
+
+-- старі HUD-кнопки (запасний варіант)
+core.register_on_hud_touch(function(player, hud_element_name)
+    local key = hud_element_name:match("^hf_btn_(.+)$")
+    if key then handle_button(player, key) end
+end)
+
+-- кнопки рушія: клієнт шле поле rts_button
+minetest.register_on_player_receive_fields(function(player, formname, fields)
+    if formname == "" and type(fields.rts_button) == "string" then
+        handle_button(player, fields.rts_button)
+    end
 end)
 
 -- ============================================
@@ -536,10 +577,10 @@ local function enter_command_mode(player)
         if not stack:is_empty() then cmd_mode[name].inv[i] = stack:to_string() end
     end
 
-    give_command_inventory(player)
     -- Камера зверху (рушій): палець рухає камеру, кнопки руху сховані.
     -- Гравець не літає і не телепортується - клієнт сам веде камеру.
     human_fortress.rts.enter(player, pos)
+    give_command_inventory(player)
     set_reach(player, CMD_REACH)
     save_cmd_mode(name)
 

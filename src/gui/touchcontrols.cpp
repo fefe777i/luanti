@@ -463,6 +463,20 @@ void TouchControls::handleReleaseEvent(size_t pointer_id)
 	m_pointer_downpos.erase(pointer_id);
 	m_pointer_pos.erase(pointer_id);
 
+	// RTS toolbar button released: this is the "click"
+	auto rts_btn = m_rts_button_pointers.find(pointer_id);
+	if (rts_btn != m_rts_button_pointers.end()) {
+		const size_t idx = rts_btn->second;
+		m_rts_button_pointers.erase(rts_btn);
+		if (idx < m_rts_buttons.size()) {
+			m_rts_button_result = m_rts_buttons[idx].def.name;
+			if (!m_rts_buttons[idx].def.action)
+				m_rts_active_button = m_rts_buttons[idx].def.name;
+		}
+		refreshRtsButtonColors();
+		return;
+	}
+
 	// handle buttons
 	if (buttonsHandleRelease(m_buttons, pointer_id))
 		return;
@@ -551,6 +565,17 @@ void TouchControls::translateEvent(const SEvent &event)
 		m_pointer_pos[pointer_id] = touch_pos;
 
 		bool prevent_short_tap = false;
+
+		// RTS toolbar: big buttons at the bottom of the screen
+		if (m_rts_mode) {
+			for (size_t i = 0; i < m_rts_buttons.size(); i++) {
+				if (m_rts_buttons[i].rect.isPointInside(touch_pos)) {
+					m_rts_button_pointers[pointer_id] = i;
+					refreshRtsButtonColors();
+					return;
+				}
+			}
+		}
 
 		IGUIElement *element = m_guienv->getRootGUIElement()->getElementFromPoint(touch_pos);
 
@@ -755,6 +780,83 @@ void TouchControls::rtsPointerMoved(size_t id, const v2s32 &prev, const v2s32 &n
 	m_rts_pan += (a_new - a_old) * 0.5f;
 }
 
+void TouchControls::setRtsButtons(const std::vector<RtsButton> &buttons,
+		const std::string &active)
+{
+	const bool same_defs = buttons == m_rts_button_defs;
+	m_rts_active_button = active;
+	if (same_defs) {
+		refreshRtsButtonColors();
+		return;
+	}
+	m_rts_button_defs = buttons;
+	m_rts_button_pointers.clear();
+	buildRtsButtons();
+}
+
+void TouchControls::buildRtsButtons()
+{
+	m_rts_buttons.clear();
+	const size_t n = m_rts_button_defs.size();
+	if (n == 0)
+		return;
+
+	// Finger sized buttons in rows at the bottom centre. The size is the
+	// normal touch button size, shrunk until at most two rows are needed.
+	const s32 margin = std::max<s32>(8, m_button_size / 6);
+	const s32 avail_w = (s32)m_screensize.X - 2 * margin;
+	s32 size = std::max<s32>(32, (m_button_size * 4) / 5);
+	s32 gap = std::max<s32>(4, size / 8);
+	s32 per_row = 1;
+	for (;;) {
+		per_row = std::max<s32>(1, (avail_w + gap) / (size + gap));
+		const s32 rows = ((s32)n + per_row - 1) / per_row;
+		if (rows <= 2 || size <= 32)
+			break;
+		size -= 4;
+		gap = std::max<s32>(4, size / 8);
+	}
+	const s32 rows = ((s32)n + per_row - 1) / per_row;
+
+	for (size_t i = 0; i < n; i++) {
+		const s32 row = (s32)i / per_row;      // 0 = top row
+		const s32 col = (s32)i % per_row;
+		const s32 in_row = std::min<s32>(per_row, (s32)n - row * per_row);
+		const s32 row_w = in_row * size + (in_row - 1) * gap;
+		const s32 x = ((s32)m_screensize.X - row_w) / 2 + col * (size + gap);
+		const s32 y = (s32)m_screensize.Y - margin - (rows - row) * size
+				- (rows - 1 - row) * gap;
+
+		RtsButtonGui b;
+		b.def = m_rts_button_defs[i];
+		b.rect = recti(x, y, x + size, y + size);
+		IGUIImage *img = m_guienv->addImage(b.rect, nullptr, -1);
+		img->setUseAlphaChannel(true);
+		img->setVisible(m_visible && m_rts_mode);
+		loadButtonTexture(img, b.def.image);
+		b.image = grab_gui_element<IGUIImage>(img);
+		m_rts_buttons.push_back(std::move(b));
+	}
+	refreshRtsButtonColors();
+}
+
+void TouchControls::refreshRtsButtonColors()
+{
+	std::vector<bool> pressed(m_rts_buttons.size(), false);
+	for (const auto &[pointer, idx] : m_rts_button_pointers) {
+		if (idx < pressed.size())
+			pressed[idx] = true;
+	}
+	for (size_t i = 0; i < m_rts_buttons.size(); i++) {
+		video::SColor c(235, 255, 255, 255);
+		if (m_rts_buttons[i].def.name == m_rts_active_button)
+			c = video::SColor(255, 150, 255, 150); // selected tool
+		if (pressed[i])
+			c = video::SColor(255, 170, 170, 170);  // finger down
+		m_rts_buttons[i].image->setColor(c);
+	}
+}
+
 void TouchControls::rtsBoxStart()
 {
 	m_rts_box_active = true;
@@ -805,6 +907,7 @@ void TouchControls::setRtsMode(bool enabled)
 		return;
 
 	releaseAll();
+	m_rts_button_pointers.clear();
 	rtsBoxCancel();
 	m_rts_box_result.reset();
 	m_rts_mode = enabled;
@@ -842,6 +945,7 @@ void TouchControls::step(float dtime)
 		m_screensize = screensize;
 		m_button_size = button_size;
 		applyLayout(m_layout);
+		buildRtsButtons();
 	}
 
 	// simulate keyboard repeats
@@ -939,10 +1043,14 @@ void TouchControls::updateVisibility()
 		button.gui_button->setVisible(overflow_visible);
 	for (auto &text : m_overflow_button_titles)
 		text->setVisible(overflow_visible);
+
+	for (auto &b : m_rts_buttons)
+		b.image->setVisible(m_visible && m_rts_mode);
 }
 
 void TouchControls::releaseAll()
 {
+	m_rts_button_pointers.clear(); // no clicks when everything is force-released
 	while (!m_pointer_pos.empty())
 		handleReleaseEvent(m_pointer_pos.begin()->first);
 

@@ -467,6 +467,9 @@ enum ToClientCommand : u16
 		if rts_enabled:
 			f32 min_x, min_z, max_x, max_z
 			f32 pitch, yaw, dist_min, dist_max
+			u8 button_count
+			for each button: string name, string image, u8 action
+			string active_button
 	*/
 
 	TOCLIENT_HUDADD = 0x49,

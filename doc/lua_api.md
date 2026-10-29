@@ -9571,6 +9571,14 @@ You **must not** mix names and track numbers to refer to the same animation.
       - `yaw`: look direction in degrees (default 0, same as `set_look_horizontal`)
       - `dist_min`, `dist_max`: closest and farthest zoom distance in nodes
         (defaults 10 and 60)
+      - `buttons`: toolbar drawn by the client at the bottom of the screen
+        (finger sized, like the normal touch buttons). A list of
+        `{name = "...", image = "texture.png^modifiers", action = false}`.
+        When one is pressed the client sends the field `rts_button` = `name`
+        with formname `""` (`core.register_on_player_receive_fields`).
+        `action = true` buttons do not stay highlighted. At most 32 buttons.
+      - `active`: the `name` of the button to highlight
+      Send the whole `rts` table again to change the buttons or `active`.
       The focus starts at the player's position when the mode is enabled.
       Holding a finger still for the long-tap delay and then dragging draws
       a selection box on the client. When the finger is lifted the client
