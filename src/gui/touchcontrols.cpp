@@ -190,6 +190,40 @@ static const char *setting_names[] = {
 	"touch_layout",
 };
 
+namespace {
+
+// Translucent green rectangle drawn while the RTS selection box is dragged.
+class RtsBoxElement : public gui::IGUIElement
+{
+public:
+	RtsBoxElement(gui::IGUIEnvironment *env, gui::IGUIElement *parent) :
+		gui::IGUIElement(gui::EGUIET_ELEMENT, env, parent, -1, recti(0, 0, 1, 1))
+	{}
+
+	void draw() override
+	{
+		if (!isVisible())
+			return;
+		video::IVideoDriver *driver = Environment->getVideoDriver();
+		const recti r = AbsoluteRect;
+		driver->draw2DRectangle(video::SColor(55, 70, 255, 70), r, &AbsoluteClippingRect);
+
+		const video::SColor edge(255, 110, 255, 110);
+		const s32 t = 3;
+		driver->draw2DRectangle(edge, recti(r.UpperLeftCorner.X, r.UpperLeftCorner.Y,
+				r.LowerRightCorner.X, r.UpperLeftCorner.Y + t), &AbsoluteClippingRect);
+		driver->draw2DRectangle(edge, recti(r.UpperLeftCorner.X, r.LowerRightCorner.Y - t,
+				r.LowerRightCorner.X, r.LowerRightCorner.Y), &AbsoluteClippingRect);
+		driver->draw2DRectangle(edge, recti(r.UpperLeftCorner.X, r.UpperLeftCorner.Y,
+				r.UpperLeftCorner.X + t, r.LowerRightCorner.Y), &AbsoluteClippingRect);
+		driver->draw2DRectangle(edge, recti(r.LowerRightCorner.X - t, r.UpperLeftCorner.Y,
+				r.LowerRightCorner.X, r.LowerRightCorner.Y), &AbsoluteClippingRect);
+		gui::IGUIElement::draw();
+	}
+};
+
+} // namespace
+
 TouchControls::TouchControls(IrrlichtDevice *device, ISimpleTextureSource *tsrc):
 		m_device(device),
 		m_guienv(device->getGUIEnvironment()),
@@ -198,6 +232,13 @@ TouchControls::TouchControls(IrrlichtDevice *device, ISimpleTextureSource *tsrc)
 {
 	m_screensize = m_device->getVideoDriver()->getScreenSize();
 	m_button_size = ButtonLayout::getButtonSize(m_screensize);
+
+	{
+		auto *box = new RtsBoxElement(m_guienv, m_guienv->getRootGUIElement());
+		box->setVisible(false);
+		box->drop(); // the root element keeps it alive now
+		m_rts_box_gui = grab_gui_element<gui::IGUIElement>(box);
+	}
 
 	readSettings();
 	for (auto name : setting_names)
@@ -446,6 +487,13 @@ void TouchControls::handleReleaseEvent(size_t pointer_id)
 		// handle the point used for moving view
 		m_has_move_id = false;
 
+		if (m_rts_box_active) {
+			// end of a selection box drag
+			rtsBoxFinish();
+			m_tap_state = TapState::None;
+			return;
+		}
+
 		// If m_tap_state is already set to TapState::ShortTap, we must keep
 		// that value. Otherwise, many short taps will be ignored if you tap
 		// very fast.
@@ -567,6 +615,7 @@ void TouchControls::translateEvent(const SEvent &event)
 			}
 		} else if (m_rts_mode && m_has_move_id && !m_has_rts_second) {
 			// Second finger: pinch zoom. Cancel any tap of the first finger.
+			rtsBoxCancel();
 			m_has_rts_second = true;
 			m_rts_second_id = pointer_id;
 			m_move_has_really_moved = true;
@@ -677,6 +726,12 @@ void TouchControls::rtsPointerMoved(size_t id, const v2s32 &prev, const v2s32 &n
 	const v2f a_old((f32)prev.X, (f32)prev.Y);
 	const v2f a_new((f32)now.X, (f32)now.Y);
 
+	if (m_rts_box_active && !m_has_rts_second && id == m_move_id) {
+		m_rts_box_cur = now;
+		rtsBoxUpdateGui();
+		return;
+	}
+
 	if (!m_has_rts_second) {
 		// One finger: drag the map, but only once the finger has really moved,
 		// so that jittery taps do not shake the camera.
@@ -700,12 +755,58 @@ void TouchControls::rtsPointerMoved(size_t id, const v2s32 &prev, const v2s32 &n
 	m_rts_pan += (a_new - a_old) * 0.5f;
 }
 
+void TouchControls::rtsBoxStart()
+{
+	m_rts_box_active = true;
+	m_rts_box_start = m_move_pos;
+	m_rts_box_cur = m_move_pos;
+	rtsBoxUpdateGui();
+	m_rts_box_gui->setVisible(true);
+}
+
+void TouchControls::rtsBoxUpdateGui()
+{
+	m_rts_box_gui->setRelativePosition(recti(
+			std::min(m_rts_box_start.X, m_rts_box_cur.X),
+			std::min(m_rts_box_start.Y, m_rts_box_cur.Y),
+			std::max(m_rts_box_start.X, m_rts_box_cur.X) + 1,
+			std::max(m_rts_box_start.Y, m_rts_box_cur.Y) + 1));
+}
+
+void TouchControls::rtsBoxCancel()
+{
+	m_rts_box_active = false;
+	m_rts_box_gui->setVisible(false);
+}
+
+void TouchControls::rtsBoxFinish()
+{
+	const v2s32 start = m_rts_box_start;
+	const v2s32 end = m_rts_box_cur;
+	rtsBoxCancel();
+
+	const v2s32 d = end - start;
+	if (d.getLength() > m_touchscreen_threshold * 1.5) {
+		m_rts_box_result = std::make_pair(start, end);
+		return;
+	}
+
+	// Held, but barely moved: this was an ordinary long tap after all
+	const u64 now = porting::getTimeMs();
+	if (m_last_mode == LONG_DIG_SHORT_PLACE)
+		m_dig_pressed_until = now + SIMULATED_CLICK_DURATION_MS;
+	else
+		m_place_pressed_until = now + SIMULATED_CLICK_DURATION_MS;
+}
+
 void TouchControls::setRtsMode(bool enabled)
 {
 	if (m_rts_mode == enabled)
 		return;
 
 	releaseAll();
+	rtsBoxCancel();
+	m_rts_box_result.reset();
 	m_rts_mode = enabled;
 	m_has_rts_second = false;
 	m_rts_pan = v2f(0.0f, 0.0f);
@@ -753,11 +854,15 @@ void TouchControls::step(float dtime)
 	// if a new placed pointer isn't moved for some time start digging
 	if (m_interaction_style != BUTTONS_CROSSHAIR &&
 			m_has_move_id && !m_move_has_really_moved &&
+			!m_rts_box_active &&
 			m_tap_state == TapState::None) {
 		u64 delta = porting::getDeltaMs(m_move_downtime, porting::getTimeMs());
 
 		if (delta > m_long_tap_delay) {
-			m_tap_state = TapState::LongTap;
+			if (m_rts_mode && !m_has_rts_second)
+				rtsBoxStart(); // long press + drag = selection box
+			else
+				m_tap_state = TapState::LongTap;
 		}
 	}
 

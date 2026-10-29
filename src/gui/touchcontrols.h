@@ -98,6 +98,15 @@ public:
 	void setRtsMode(bool enabled);
 	bool isRtsMode() const { return m_rts_mode; }
 
+	// Selection box (long press, then drag): the finished box in screen
+	// pixels, or nothing. Taken once.
+	std::optional<std::pair<v2s32, v2s32>> takeRtsBox()
+	{
+		auto res = m_rts_box_result;
+		m_rts_box_result.reset();
+		return res;
+	}
+
 	// Accumulated finger movement in pixels since the last call.
 	v2f getRtsPan()
 	{
@@ -208,6 +217,17 @@ private:
 	bool m_has_rts_second = false; // second finger of a pinch (first is m_move_id)
 	size_t m_rts_second_id = 0;
 	void rtsPointerMoved(size_t id, const v2s32 &prev, const v2s32 &now);
+
+	// RTS selection box
+	bool m_rts_box_active = false;
+	v2s32 m_rts_box_start;
+	v2s32 m_rts_box_cur;
+	std::optional<std::pair<v2s32, v2s32>> m_rts_box_result;
+	std::shared_ptr<IGUIElement> m_rts_box_gui;
+	void rtsBoxStart();
+	void rtsBoxUpdateGui();
+	void rtsBoxCancel();
+	void rtsBoxFinish();
 
 	bool m_has_joystick_id = false;
 	size_t m_joystick_id;

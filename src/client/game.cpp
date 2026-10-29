@@ -30,6 +30,7 @@
 #include "minimap.h"
 #include "network/networkexceptions.h"
 #include "nodedef.h"         // Needed for determining pointing to nodes
+#include <ISceneCollisionManager.h> // RTS selection box rays
 #include "nodemetadata.h"
 #include "particles.h"
 #include "porting.h"
@@ -2056,6 +2057,9 @@ void Game::updateRtsCamera(f32 dtime, CameraOrientation *target, CameraOrientati
 	f32 zoom_mul = 1.0f;
 
 	if (g_touchcontrols) {
+		if (auto box = g_touchcontrols->takeRtsBox())
+			sendRtsBox(box->first, box->second);
+
 		const v2f px = g_touchcontrols->getRtsPan();
 		zoom_mul = g_touchcontrols->getRtsZoomMul();
 
@@ -2137,6 +2141,34 @@ void Game::updateRtsCamera(f32 dtime, CameraOrientation *target, CameraOrientati
 
 	player->setPosition(eye - player->getEyeOffset());
 	player->setSpeed(v3f(0.0f));
+}
+
+void Game::sendRtsBox(const v2s32 &a, const v2s32 &b)
+{
+	const s32 x1 = std::min(a.X, b.X), x2 = std::max(a.X, b.X);
+	const s32 y1 = std::min(a.Y, b.Y), y2 = std::max(a.Y, b.Y);
+	const v2s32 corners[4] = {
+		v2s32(x1, y1), v2s32(x2, y1), v2s32(x2, y2), v2s32(x1, y2)
+	};
+
+	auto *coll = device->getSceneManager()->getSceneCollisionManager();
+
+	// "eye;ray1;ray2;ray3;ray4" - camera position in nodes and the directions
+	// of the rays through the four corners of the box. The server decides
+	// which units are inside the pyramid they span.
+	const v3f eye = camera->getPosition() / BS;
+	std::string value = ftos(eye.X) + "," + ftos(eye.Y) + "," + ftos(eye.Z);
+	for (const v2s32 &c : corners) {
+		const core::line3d<f32> ray = coll->getRayFromScreenCoordinates(c);
+		v3f dir = ray.end - ray.start;
+		dir.normalize();
+		value += ";" + ftos(dir.X) + "," + ftos(dir.Y) + "," + ftos(dir.Z);
+	}
+
+	// Formname "" is passed through to register_on_player_receive_fields
+	StringMap fields;
+	fields["rts_box"] = value;
+	client->sendInventoryFields("", fields);
 }
 
 void Game::updateCameraOrientation(CameraOrientation *cam, float dtime)

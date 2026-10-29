@@ -9572,6 +9572,15 @@ You **must not** mix names and track numbers to refer to the same animation.
       - `dist_min`, `dist_max`: closest and farthest zoom distance in nodes
         (defaults 10 and 60)
       The focus starts at the player's position when the mode is enabled.
+      Holding a finger still for the long-tap delay and then dragging draws
+      a selection box on the client. When the finger is lifted the client
+      sends the field `rts_box` with formname `""` (see
+      `core.register_on_player_receive_fields`), the value being
+      `"ex,ey,ez;ax,ay,az;bx,by,bz;cx,cy,cz;dx,dy,dz"`: the camera position
+      in nodes and the unit direction vectors of the rays through the four
+      corners of the box (top-left, top-right, bottom-right, bottom-left).
+      A point is inside the box if it lies inside the pyramid they span.
+      A long press that barely moves still works as an ordinary long tap.
       Remember to restore the position (`set_pos`) when disabling it.
     * Supported by clients since 5.12.0.
 * `get_camera()`: Returns the camera parameters as a table as above.
