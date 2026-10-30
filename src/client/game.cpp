@@ -2031,6 +2031,7 @@ void Game::updateRtsCamera(f32 dtime, CameraOrientation *target, CameraOrientati
 		m_rts_focus = player->getPosition();
 		m_rts_dist = (rts.dist_min + rts.dist_max) * 0.5f;
 		m_rts_vel = v2f(0.0f, 0.0f);
+		m_rts_yaw_offset = 0.0f;
 		m_rts_buttons_valid = false;
 		if (g_touchcontrols)
 			g_touchcontrols->setRtsMode(true);
@@ -2042,13 +2043,18 @@ void Game::updateRtsCamera(f32 dtime, CameraOrientation *target, CameraOrientati
 		updateCameraMode();
 	}
 
-	// Fixed orientation: ignore whatever the view code accumulated
-	target->camera_yaw = rts.yaw;
+	// Two-finger twist rotates the camera around the focus point
+	if (g_touchcontrols)
+		m_rts_yaw_offset += g_touchcontrols->getRtsRotate();
+	const f32 cam_yaw = rts.yaw + m_rts_yaw_offset;
+
+	// Fixed pitch: ignore whatever the view code accumulated
+	target->camera_yaw = cam_yaw;
 	target->camera_pitch = rts.pitch;
-	view->camera_yaw = rts.yaw;
+	view->camera_yaw = cam_yaw;
 	view->camera_pitch = rts.pitch;
 
-	const f32 yaw_rad = rts.yaw * core::DEGTORAD;
+	const f32 yaw_rad = cam_yaw * core::DEGTORAD;
 	const f32 pitch_rad = rts.pitch * core::DEGTORAD;
 	const v2f fwd(-std::sin(yaw_rad), std::cos(yaw_rad)); // horizontal look direction
 	const v2f right(fwd.Y, -fwd.X);

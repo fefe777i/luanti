@@ -127,6 +127,15 @@ public:
 		return res;
 	}
 
+	// Accumulated two-finger twist in degrees since the last call
+	// (positive = clockwise on screen).
+	f32 getRtsRotate()
+	{
+		f32 res = m_rts_rotate;
+		m_rts_rotate = 0.0f;
+		return res;
+	}
+
 	// Accumulated pinch factor since the last call:
 	// < 1 means the fingers moved apart (zoom in), > 1 means together (zoom out).
 	f32 getRtsZoomMul()
@@ -226,6 +235,7 @@ private:
 	bool m_rts_mode = false;
 	v2f m_rts_pan = v2f(0.0f, 0.0f);
 	f32 m_rts_zoom_mul = 1.0f;
+	f32 m_rts_rotate = 0.0f;
 	bool m_has_rts_second = false; // second finger of a pinch (first is m_move_id)
 	size_t m_rts_second_id = 0;
 	void rtsPointerMoved(size_t id, const v2s32 &prev, const v2s32 &now);

@@ -777,6 +777,18 @@ void TouchControls::rtsPointerMoved(size_t id, const v2s32 &prev, const v2s32 &n
 	if (d_old > 8.0f && d_new > 8.0f)
 		m_rts_zoom_mul *= d_old / d_new;
 
+	// Twist: change of the angle of the line between the two fingers
+	if (d_old > 40.0f && d_new > 40.0f) {
+		const f32 ang_old = atan2f(a_old.Y - other.Y, a_old.X - other.X);
+		const f32 ang_new = atan2f(a_new.Y - other.Y, a_new.X - other.X);
+		f32 da = ang_new - ang_old;
+		while (da > core::PI)
+			da -= 2.0f * core::PI;
+		while (da < -core::PI)
+			da += 2.0f * core::PI;
+		m_rts_rotate += da * core::RADTODEG;
+	}
+
 	m_rts_pan += (a_new - a_old) * 0.5f;
 }
 
@@ -914,6 +926,7 @@ void TouchControls::setRtsMode(bool enabled)
 	m_has_rts_second = false;
 	m_rts_pan = v2f(0.0f, 0.0f);
 	m_rts_zoom_mul = 1.0f;
+	m_rts_rotate = 0.0f;
 	m_overflow_open = false;
 	m_has_move_id = false;
 	m_tap_state = TapState::None;

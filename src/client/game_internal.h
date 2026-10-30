@@ -392,6 +392,7 @@ private:
 	v3f m_rts_focus;            // point on the ground the camera looks at (BS-space)
 	f32 m_rts_dist = 30.0f;     // distance camera <-> focus, in nodes
 	v2f m_rts_vel;              // pan inertia, nodes per second
+	f32 m_rts_yaw_offset = 0.0f; // camera rotation by two-finger twist, degrees
 	// toolbar state last given to TouchControls (so that a local highlight
 	// is not overwritten every frame)
 	bool m_rts_buttons_valid = false;
