@@ -33,6 +33,7 @@ public:
 		DROP,
 		INVENTORY,
 		CHAT,
+		VOICE,
 		CMD,
 		CMD_LOCAL,
 		CONSOLE,

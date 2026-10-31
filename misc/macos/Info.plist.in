@@ -20,6 +20,8 @@
 	<string>@VERSION_STRING@</string>
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.games</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>The microphone is used for the in-game voice chat.</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
 </dict>

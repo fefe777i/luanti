@@ -4,6 +4,8 @@
 
 #include <algorithm>
 #include "client/client.h"
+#include "client/voicechat.h"
+#include "util/voice_session.h"
 
 #include "exceptions.h"
 #include "irr_v2d.h"
@@ -1948,6 +1950,40 @@ void Client::handleCommand_SetLighting(NetworkPacket *pkt)
 		// >= 5.16.0-dev
 		*pkt >> lighting.shadow_direction;
 	} while (0);
+}
+
+void Client::handleCommand_VoiceHello(NetworkPacket *pkt)
+{
+	if (!m_voice)
+		return;
+
+	u8 version = 0, enabled = 0;
+	*pkt >> version >> enabled;
+	if (version != voicesession::PROTOCOL_VERSION)
+		return;
+
+	uint8_t server_pub[32] = {};
+	float radius = 10.0f;
+	if (enabled) {
+		if (pkt->getRemainingBytes() < 32 + sizeof(float))
+			return;
+		pkt->readRawString((char *)server_pub, 32);
+		*pkt >> radius;
+	}
+	m_voice->onServerHello(enabled != 0, server_pub, radius);
+}
+
+void Client::handleCommand_Voice(NetworkPacket *pkt)
+{
+	if (!m_voice)
+		return;
+
+	u16 speaker = 0;
+	s32 x = 0, y = 0, z = 0;
+	u32 ctr = 0;
+	std::string ct;
+	*pkt >> speaker >> x >> y >> z >> ctr >> ct;
+	m_voice->onVoicePacket(speaker, voicesession::Pos{x, y, z}, ctr, ct);
 }
 
 void Client::handleCommand_ChatCommands(NetworkPacket *pkt)

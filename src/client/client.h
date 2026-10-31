@@ -32,6 +32,7 @@
 class Camera;
 class ClientMediaDownloader;
 class ISoundManager;
+class VoiceChat;
 class IWritableItemDefManager;
 class IWritableShaderSource;
 class IWritableTextureSource;
@@ -217,6 +218,8 @@ public:
 	void handleCommand_SetLighting(NetworkPacket *pkt);
 	void handleCommand_Transfer(NetworkPacket *pkt);
 	void handleCommand_ChatCommands(NetworkPacket *pkt);
+	void handleCommand_VoiceHello(NetworkPacket *pkt);
+	void handleCommand_Voice(NetworkPacket *pkt);
 	void handleCommand_Camera(NetworkPacket* pkt);
 
 	void ProcessData(NetworkPacket *pkt);
@@ -415,6 +418,10 @@ public:
 
 	void makeScreenshot();
 
+	// Voice chat (see voicechat.h)
+	void setVoicePushToTalk(bool down);
+	bool isVoiceTransmitting() const;
+
 	inline void pushToChatQueue(ChatMessage *cec)
 	{
 		m_chat_queue.push(cec);
@@ -514,6 +521,10 @@ private:
 	// Workshop 47: <0 = nothing to do, otherwise seconds since the client
 	// became ready; when it reaches the delay the chosen skin is uploaded.
 	float m_ws47_skin_timer = -1.0f;
+
+	std::unique_ptr<VoiceChat> m_voice;
+	void voiceStart();
+	void voiceStep(float dtime);
 	int m_playerpos_repeat_count = 0;
 	IntervalLimiter m_map_timer_and_unload_interval;
 

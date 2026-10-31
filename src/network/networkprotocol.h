@@ -737,7 +737,27 @@ enum ToClientCommand : u16
 			std::string description
 	*/
 
-	TOCLIENT_NUM_MSG_TYPES = 0x67,
+	TOCLIENT_VOICE_HELLO = 0x67,
+	/*
+		Answer to TOSERVER_VOICE_HELLO. Older clients ignore this command.
+		u8 voice chat protocol version (1)
+		u8 enabled (0 = the server has voice chat turned off)
+		u8[32] server X25519 public key (only if enabled)
+		f32 hearing radius in nodes (only if enabled)
+	*/
+
+	TOCLIENT_VOICE = 0x68,
+	/*
+		A voice frame from a nearby player (unreliable).
+		Older clients ignore this command.
+		u16 speaker peer id
+		s32 x, y, z: position of the speaker in hundredths of a node
+		u32 counter (nonce of this packet for this receiver)
+		std::string ChaCha20-Poly1305(u32 speaker sequence + ADPCM frame)
+		  key = server->client key, AAD = 2 | speaker | position | counter
+	*/
+
+	TOCLIENT_NUM_MSG_TYPES = 0x69,
 };
 
 enum ToServerCommand : u16
@@ -951,7 +971,23 @@ enum ToServerCommand : u16
 		-- touchscreen client.
 	*/
 
-	TOSERVER_NUM_MSG_TYPES = 0x55,
+	TOSERVER_VOICE_HELLO = 0x55,
+	/*
+		Sent once after joining by clients that want to use voice chat.
+		Servers that don't know the command ignore it.
+		u8 voice chat protocol version (1)
+		u8[32] client X25519 public key
+	*/
+
+	TOSERVER_VOICE = 0x56,
+	/*
+		One 20 ms voice frame (unreliable).
+		u32 counter (nonce, increases with every packet)
+		std::string ChaCha20-Poly1305(ADPCM frame)
+		  key = client->server key, AAD = 1
+	*/
+
+	TOSERVER_NUM_MSG_TYPES = 0x57,
 };
 
 enum AuthMechanism

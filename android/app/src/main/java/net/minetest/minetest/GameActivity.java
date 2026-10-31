@@ -21,11 +21,13 @@ package net.minetest.minetest;
 
 import org.libsdl.app.SDLActivity;
 
+import android.Manifest;
 import android.app.Notification;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.content.ActivityNotFoundException;
 import android.net.Uri;
 import android.os.Build;
@@ -100,6 +102,21 @@ public class GameActivity extends SDLActivity {
 
 
 	private native void saveSettings();
+
+	// Voice chat: the microphone permission is asked for the first time the
+	// player joins a server with voice chat and the microphone is switched on.
+	public boolean hasMicrophonePermission() {
+		return Build.VERSION.SDK_INT < Build.VERSION_CODES.M ||
+				checkSelfPermission(Manifest.permission.RECORD_AUDIO)
+						== PackageManager.PERMISSION_GRANTED;
+	}
+
+	public void requestMicrophonePermission() {
+		if (hasMicrophonePermission() || Build.VERSION.SDK_INT < Build.VERSION_CODES.M)
+			return;
+		runOnUiThread(() -> requestPermissions(
+				new String[] { Manifest.permission.RECORD_AUDIO }, 1003));
+	}
 
 	@Override
 	protected void onStop() {

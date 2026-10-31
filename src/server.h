@@ -19,6 +19,7 @@
 #include "threading/ordered_mutex.h"
 #include "translation.h"
 #include "sound_spec.h"
+#include "util/voice_crypto.h"
 #include <atomic>
 #include <csignal>
 #include <string>
@@ -244,6 +245,8 @@ public:
 	void handleCommand_HaveMedia(NetworkPacket *pkt);
 	void handleCommand_UpdateClientInfo(NetworkPacket *pkt);
 	void handleCommand_HudTouch(NetworkPacket *pkt);
+	void handleCommand_VoiceHello(NetworkPacket *pkt);
+	void handleCommand_Voice(NetworkPacket *pkt);
 
 	void ProcessData(NetworkPacket *pkt);
 
@@ -819,6 +822,27 @@ private:
 	// pending dynamic media callbacks, clients inform the server when they have a file fetched
 	std::unordered_map<u32, PendingDynamicMediaCallback> m_pending_dyn_media;
 	float m_step_pending_dyn_media_timer = 0.0f;
+
+	/*
+		Voice chat (see util/voice_session.h)
+	*/
+	struct VoiceSession
+	{
+		uint8_t key_c2s[32] = {}; // decrypts what the client sends
+		uint8_t key_s2c[32] = {}; // encrypts what we send to the client
+		uint8_t client_pub[32] = {};
+		uint8_t server_pub[32] = {};
+		voicecrypto::ReplayWindow rx;
+		u32 tx_counter = 0;
+		u64 window_start_ms = 0;
+		int frames_in_window = 0;
+		// "shout" privilege is cached, looking it up calls into Lua
+		u64 priv_checked_ms = 0;
+		bool may_speak = false;
+	};
+	std::unordered_map<session_t, VoiceSession> m_voice_sessions;
+	bool m_voice_enabled = true;
+	float m_voice_radius = 10.0f; // nodes
 
 	/*
 		Sounds

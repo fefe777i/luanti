@@ -96,6 +96,8 @@ const ToServerCommandHandler toServerCommandTable[TOSERVER_NUM_MSG_TYPES] =
 	{ "TOSERVER_SRP_BYTES_M",              TOSERVER_STATE_NOT_CONNECTED, &Server::handleCommand_SrpBytesM }, // 0x52
 	{ "TOSERVER_UPDATE_CLIENT_INFO",       TOSERVER_STATE_INGAME, &Server::handleCommand_UpdateClientInfo }, // 0x53
 	{ "TOSERVER_HUD_TOUCH",                TOSERVER_STATE_INGAME, &Server::handleCommand_HudTouch }, // 0x54
+	{ "TOSERVER_VOICE_HELLO",              TOSERVER_STATE_INGAME, &Server::handleCommand_VoiceHello }, // 0x55
+	{ "TOSERVER_VOICE",                    TOSERVER_STATE_INGAME, &Server::handleCommand_Voice }, // 0x56
 };
 
 const static ClientCommandFactory null_command_factory = { nullptr, 0, false };
@@ -216,4 +218,6 @@ const ClientCommandFactory clientCommandFactoryTable[TOCLIENT_NUM_MSG_TYPES] =
 	{ "TOCLIENT_SPAWN_PARTICLE_BATCH",     0, true }, // 0x64
 	{ "TOCLIENT_TRANSFER",                  0, true }, // 0x65
 	{ "TOCLIENT_CHAT_COMMANDS",             0, true }, // 0x66
+	{ "TOCLIENT_VOICE_HELLO",              0, true }, // 0x67
+	{ "TOCLIENT_VOICE",                    0, false }, // 0x68
 };

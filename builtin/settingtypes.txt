@@ -200,6 +200,9 @@ keymap_aux1 (Aux1) key SYSTEM_SCANCODE_8|GAMEPAD_BUTTON_2
 
 keymap_chat (Open chat) key SYSTEM_SCANCODE_23
 
+#    Push-to-talk key for the voice chat.
+keymap_voice (Voice chat push-to-talk) key SYSTEM_SCANCODE_27
+
 #    Key for opening the chat window to type commands.
 keymap_cmd (Command) key SYSTEM_SCANCODE_56
 
@@ -873,6 +876,23 @@ sound_volume_unfocused (Volume when unfocused) float 0.3 0.0 1.0
 #    pause menu.
 mute_sound (Mute sound) bool false
 
+#    Voice chat: how your microphone is used on servers that support it.
+#    off: voice chat is not used at all.
+#    listen: you hear others, the microphone is never opened.
+#    ptt: push to talk, you transmit while the voice key is held.
+#    vad: voice activation, you transmit whenever you speak.
+#    Other players hear you from where your character is standing.
+voice_chat_mode (Voice chat microphone) enum ptt off,listen,ptt,vad
+
+#    Volume of other players' voices.
+voice_chat_volume (Voice chat volume) float 1.0 0.0 2.0
+
+#    Gain applied to your microphone before it is sent.
+voice_chat_mic_gain (Microphone gain) float 1.0 0.1 4.0
+
+#    Loudness (0..1) above which voice activation starts transmitting.
+voice_chat_vad_threshold (Voice activation threshold) float 0.02 0.001 0.5
+
 [*User Interfaces]
 
 #    Set the language. By default, the system language is used.
@@ -1130,6 +1150,13 @@ csm_restriction_noderange (Client-side node lookup range restriction) int 0 0 42
 #    Remove color codes from incoming chat messages
 #    Use this to stop players from being able to use color in their messages
 strip_color_codes (Strip color codes) bool true
+
+#    Enable the proximity voice chat. Players hear each other when they are
+#    close together; voice is encrypted between each client and the server.
+voice_chat (Voice chat) bool true
+
+#    Distance (in nodes) up to which players can hear each other.
+voice_chat_radius (Voice chat radius) float 10.0 1.0 100.0
 
 #    Set the maximum length of a chat message (in characters) sent by clients.
 chat_message_max_size (Chat message max length) int 500 10 65535

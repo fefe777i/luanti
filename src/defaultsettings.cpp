@@ -101,6 +101,13 @@ void set_default_settings()
 	settings->setDefault("sound_volume", "0.8");
 	settings->setDefault("sound_volume_unfocused", "0.3");
 	settings->setDefault("mute_sound", "false");
+	settings->setDefault("voice_chat", "true");
+	settings->setDefault("voice_chat_radius", "10.0");
+	// No keyboard on touch devices, so they talk by voice activation.
+	settings->setDefault("voice_chat_mode", has_touch ? "vad" : "ptt");
+	settings->setDefault("voice_chat_volume", "1.0");
+	settings->setDefault("voice_chat_mic_gain", "1.0");
+	settings->setDefault("voice_chat_vad_threshold", "0.02");
 	settings->setDefault("sound_extensions_blacklist", "");
 	settings->setDefault("mesh_generation_interval", "0");
 	settings->setDefault("mesh_generation_threads", "0");
@@ -146,6 +153,7 @@ void set_default_settings()
 	settings->setDefault("keymap_pause", "GAMEPAD_BUTTON_6"); // Gamepad Start
 	settings->setDefault("keymap_aux1", "SYSTEM_SCANCODE_8|GAMEPAD_BUTTON_2"); // KEY_KEY_E|Gamepad West
 	settings->setDefault("keymap_chat", "SYSTEM_SCANCODE_23"); // KEY_KEY_T
+	settings->setDefault("keymap_voice", "SYSTEM_SCANCODE_27"); // KEY_KEY_X
 	settings->setDefault("keymap_cmd", "SYSTEM_SCANCODE_56"); // /
 	settings->setDefault("keymap_cmd_local", "SYSTEM_SCANCODE_55"); // .
 	settings->setDefault("keymap_minimap", "SYSTEM_SCANCODE_25|GAMEPAD_BUTTON_4"); // KEY_KEY_V|Gamepad Back

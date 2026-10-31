@@ -72,6 +72,7 @@ set(client_SRCS
 	${CMAKE_CURRENT_SOURCE_DIR}/sky.cpp
 	${CMAKE_CURRENT_SOURCE_DIR}/sound_maker.cpp
 	${CMAKE_CURRENT_SOURCE_DIR}/tile.cpp
+	${CMAKE_CURRENT_SOURCE_DIR}/voicechat.cpp
 	${CMAKE_CURRENT_SOURCE_DIR}/texturepaths.cpp
 	${CMAKE_CURRENT_SOURCE_DIR}/texturesource.cpp
 	${CMAKE_CURRENT_SOURCE_DIR}/imagesource.cpp

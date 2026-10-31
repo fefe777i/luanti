@@ -29,9 +29,12 @@
 #include "util/base64.h"
 #include "util/pointedthing.h"
 #include "util/srp.h"
+#include "util/voice_session.h"
 #include "clientdynamicinfo.h"
 
 #include <algorithm>
+#include <cmath>
+#include <cstring>
 
 void Server::handleCommand_Deprecated(NetworkPacket* pkt)
 {
@@ -836,6 +839,150 @@ void Server::handleCommand_HudTouch(NetworkPacket* pkt)
 	}
 
 	m_script->on_playerHudTouch(playersao, hud_element_name);
+}
+
+void Server::handleCommand_VoiceHello(NetworkPacket *pkt)
+{
+	session_t peer_id = pkt->getPeerId();
+
+	u8 version = 0;
+	*pkt >> version;
+	if (pkt->getRemainingBytes() < 32) {
+		warningstream << "Voice: short hello from peer " << peer_id << std::endl;
+		return;
+	}
+	uint8_t client_pub[32];
+	pkt->readRawString((char *)client_pub, 32);
+
+	if (!m_voice_enabled || version != voicesession::PROTOCOL_VERSION) {
+		m_voice_sessions.erase(peer_id);
+		NetworkPacket resp(TOCLIENT_VOICE_HELLO, 0, peer_id);
+		resp << (u8)voicesession::PROTOCOL_VERSION << (u8)0;
+		Send(&resp);
+		return;
+	}
+
+	// The client repeats its hello if the answer is slow: answer the same way.
+	auto existing = m_voice_sessions.find(peer_id);
+	if (existing != m_voice_sessions.end() &&
+			memcmp(existing->second.client_pub, client_pub, 32) == 0) {
+		NetworkPacket resp(TOCLIENT_VOICE_HELLO, 0, peer_id);
+		resp << (u8)voicesession::PROTOCOL_VERSION << (u8)1;
+		resp.putRawString((const char *)existing->second.server_pub, 32);
+		resp << m_voice_radius;
+		Send(&resp);
+		return;
+	}
+
+	uint8_t priv[32], pub[32], shared[32];
+	if (!porting::secure_rand_fill_buf(priv, sizeof(priv))) {
+		errorstream << "Voice: no secure random numbers, voice chat unavailable"
+			<< std::endl;
+		return;
+	}
+	voicecrypto::x25519Public(pub, priv);
+	if (!voicecrypto::x25519Shared(shared, priv, client_pub)) {
+		warningstream << "Voice: invalid public key from peer " << peer_id << std::endl;
+		return;
+	}
+
+	voicesession::Keys keys = voicesession::deriveKeys(shared, client_pub, pub);
+	VoiceSession &vs = m_voice_sessions[peer_id];
+	vs = VoiceSession();
+	memcpy(vs.key_c2s, keys.c2s, 32);
+	memcpy(vs.key_s2c, keys.s2c, 32);
+	memcpy(vs.client_pub, client_pub, 32);
+	memcpy(vs.server_pub, pub, 32);
+	memset(priv, 0, sizeof(priv));
+	memset(shared, 0, sizeof(shared));
+
+	NetworkPacket resp(TOCLIENT_VOICE_HELLO, 0, peer_id);
+	resp << (u8)voicesession::PROTOCOL_VERSION << (u8)1;
+	resp.putRawString((const char *)pub, 32);
+	resp << m_voice_radius;
+	Send(&resp);
+}
+
+void Server::handleCommand_Voice(NetworkPacket *pkt)
+{
+	if (!m_voice_enabled)
+		return;
+
+	session_t peer_id = pkt->getPeerId();
+	auto it = m_voice_sessions.find(peer_id);
+	if (it == m_voice_sessions.end())
+		return;
+	VoiceSession &vs = it->second;
+
+	u32 ctr = 0;
+	std::string ct;
+	*pkt >> ctr >> ct;
+
+	const u64 now = porting::getTimeMs();
+	if (now - vs.window_start_ms >= 1000) {
+		vs.window_start_ms = now;
+		vs.frames_in_window = 0;
+	}
+	if (++vs.frames_in_window > voicesession::MAX_FRAMES_PER_SECOND)
+		return;
+
+	if (!vs.rx.check(ctr))
+		return;
+	uint8_t plain[voicesession::DOWNLINK_PLAIN_SIZE];
+	// the speaker's frame goes behind the 4 byte sequence number
+	uint8_t *frame = plain + 4;
+	if (!voicesession::openUplink(vs.key_c2s, ctr, ct, frame))
+		return;
+	vs.rx.commit(ctr);
+	if (frame[2] > 88) // step index out of range: not a real frame
+		return;
+	plain[0] = ctr;
+	plain[1] = ctr >> 8;
+	plain[2] = ctr >> 16;
+	plain[3] = ctr >> 24;
+
+	RemotePlayer *speaker = m_env->getPlayer(peer_id);
+	PlayerSAO *speaker_sao = speaker ? speaker->getPlayerSAO() : nullptr;
+	if (!speaker_sao || speaker_sao->isDead())
+		return;
+
+	if (now - vs.priv_checked_ms > 2000 || vs.priv_checked_ms == 0) {
+		vs.priv_checked_ms = now;
+		vs.may_speak = checkPriv(speaker->getName(), "shout");
+	}
+	if (!vs.may_speak)
+		return;
+
+	const v3f speaker_pos = speaker_sao->getEyePosition();
+	const f32 max_dist = m_voice_radius * BS;
+	const f32 max_dist_sq = max_dist * max_dist;
+	voicesession::Pos pos = {
+		(s32)std::lround(speaker_pos.X / BS * 100.0f),
+		(s32)std::lround(speaker_pos.Y / BS * 100.0f),
+		(s32)std::lround(speaker_pos.Z / BS * 100.0f),
+	};
+
+	for (auto &entry : m_voice_sessions) {
+		const session_t listener_id = entry.first;
+		if (listener_id == peer_id)
+			continue;
+		RemotePlayer *listener = m_env->getPlayer(listener_id);
+		PlayerSAO *listener_sao = listener ? listener->getPlayerSAO() : nullptr;
+		if (!listener_sao)
+			continue;
+		if (listener_sao->getEyePosition().getDistanceFromSQ(speaker_pos) > max_dist_sq)
+			continue;
+
+		VoiceSession &lvs = entry.second;
+		u32 out_ctr = lvs.tx_counter++;
+		std::string sealed = voicesession::sealDownlink(lvs.key_s2c, peer_id, pos,
+				out_ctr, plain, sizeof(plain));
+
+		NetworkPacket out(TOCLIENT_VOICE, 0, listener_id);
+		out << (u16)peer_id << (s32)pos.x << (s32)pos.y << (s32)pos.z
+			<< out_ctr << sealed;
+		Send(&out);
+	}
 }
 
 void Server::handleCommand_PlayerItem(NetworkPacket* pkt)

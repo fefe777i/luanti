@@ -141,6 +141,26 @@ void showTextInputDialog(const std::string &hint, const std::string &current, in
 			jhint, jcurrent, jeditType);
 }
 
+bool hasMicrophonePermission()
+{
+	jmethodID has = jnienv->GetMethodID(activityClass, "hasMicrophonePermission", "()Z");
+	if (has == nullptr) {
+		jnienv->ExceptionClear();
+		return false;
+	}
+	return jnienv->CallBooleanMethod(activity, has) == JNI_TRUE;
+}
+
+void requestMicrophonePermission()
+{
+	jmethodID request = jnienv->GetMethodID(activityClass, "requestMicrophonePermission", "()V");
+	if (request == nullptr) {
+		jnienv->ExceptionClear();
+		return;
+	}
+	jnienv->CallVoidMethod(activity, request);
+}
+
 void showComboBoxDialog(const std::string *optionList, s32 listSize, s32 selectedIdx)
 {
 	jmethodID showdialog = jnienv->GetMethodID(activityClass, "showSelectionInputDialog",

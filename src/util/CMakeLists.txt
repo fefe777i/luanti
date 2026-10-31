@@ -22,6 +22,9 @@ set(util_SRCS
 	${CMAKE_CURRENT_SOURCE_DIR}/string.cpp
 	${CMAKE_CURRENT_SOURCE_DIR}/srp.cpp
 	${CMAKE_CURRENT_SOURCE_DIR}/timetaker.cpp
+	${CMAKE_CURRENT_SOURCE_DIR}/voice_codec.cpp
+	${CMAKE_CURRENT_SOURCE_DIR}/voice_crypto.cpp
+	${CMAKE_CURRENT_SOURCE_DIR}/voice_session.cpp
 	${CMAKE_CURRENT_SOURCE_DIR}/png.cpp
 	${CMAKE_CURRENT_SOURCE_DIR}/enum_string.cpp
 	PARENT_SCOPE)

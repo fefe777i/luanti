@@ -30,6 +30,19 @@ void showTextInputDialog(const std::string &hint, const std::string &current, in
 void showComboBoxDialog(const std::string *optionList, s32 listSize, s32 selectedIdx);
 
 /**
+ * Voice chat: whether the app may use the microphone (RECORD_AUDIO).
+ * Must be called from the main thread.
+ */
+bool hasMicrophonePermission();
+
+/**
+ * Voice chat: shows the system dialog asking for microphone access.
+ * The answer is not reported back, poll hasMicrophonePermission().
+ * Must be called from the main thread.
+ */
+void requestMicrophonePermission();
+
+/**
  * Opens a share intent to the file at path
  *
  * @param path

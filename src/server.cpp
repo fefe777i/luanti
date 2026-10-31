@@ -616,6 +616,8 @@ void Server::init()
 	// intended to be cached after environment loading.
 	m_liquid_transform_every = g_settings->getFloat("liquid_update");
 	m_max_chatmessage_length = g_settings->getU16("chat_message_max_size");
+	m_voice_enabled = g_settings->getBool("voice_chat");
+	m_voice_radius = rangelim(g_settings->getFloat("voice_chat_radius"), 1.0f, 100.0f);
 	m_csm_restriction_flags = g_settings->getU64("csm_restriction_flags");
 	m_csm_restriction_noderange = g_settings->getU32("csm_restriction_noderange");
 }
@@ -3152,6 +3154,8 @@ void Server::acceptAuth(session_t peer_id, bool forSudoMode)
 
 void Server::DeleteClient(session_t peer_id, ClientDeletionReason reason)
 {
+	m_voice_sessions.erase(peer_id);
+
 	std::wstring message;
 	{
 		/*
