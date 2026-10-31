@@ -76,7 +76,7 @@ const char *button_titles[] = {
 	N_("Range select"),
 	N_("Toggle minimap"),
 	N_("Toggle chat log"),
-	N_("Voice chat (push-to-talk)"),
+	N_("Voice chat (tap to talk)"),
 
 	N_("Joystick"),
 	N_("Joystick"),

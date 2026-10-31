@@ -1443,7 +1443,8 @@ void Game::processUserInput(f32 dtime)
 void Game::processKeyInput()
 {
 	// Voice chat push-to-talk (all keys are released while menus/chat are open)
-	client->setVoicePushToTalk(isKeyDown(KeyType::VOICE));
+	client->setVoicePushToTalk(isKeyDown(KeyType::VOICE) ||
+			(g_touchcontrols && g_touchcontrols->isVoiceToggled()));
 
 	if (wasKeyDown(KeyType::DROP)) {
 		dropSelectedItem(isKeyDown(KeyType::SNEAK));

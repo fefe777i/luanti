@@ -74,6 +74,10 @@ public:
 	~TouchControls();
 	DISABLE_CLASS_COPY(TouchControls);
 
+	// Voice chat button is switched on (green).
+	bool isVoiceToggled() const;
+
+
 	void translateEvent(const SEvent &event);
 	void applyContextControls(const TouchInteractionMode &mode);
 

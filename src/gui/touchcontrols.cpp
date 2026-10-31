@@ -50,6 +50,19 @@ void TouchControls::loadButtonTexture(IGUIImage *gui_button, const std::string &
 
 void TouchControls::buttonEmitAction(button_info &btn, bool action)
 {
+	if (btn.id == voice_id) {
+		// Voice chat: tap to switch the microphone on (green), tap again to
+		// switch it off (white). The state is read by the game, see
+		// isVoiceToggled(), so nothing is emitted here.
+		if (action) {
+			bool turn_on = btn.toggleable != button_info::SECOND_TEXTURE;
+			btn.toggleable = turn_on ? button_info::SECOND_TEXTURE :
+					button_info::FIRST_TEXTURE;
+			loadButtonTexture(btn.gui_button.get(), btn.toggle_textures[turn_on ? 1 : 0]);
+		}
+		return;
+	}
+
 	if (!btn.game_key)
 		return;
 
@@ -119,7 +132,7 @@ bool TouchControls::buttonsStep(std::vector<button_info> &buttons, float dtime)
 	bool has_pointers = false;
 
 	for (button_info &btn : buttons) {
-		if (btn.id == dig_id || btn.id == place_id)
+		if (btn.id == dig_id || btn.id == place_id || btn.id == voice_id)
 			continue; // key repeats would cause glitches here
 		if (btn.pointer_ids.empty())
 			continue;
@@ -320,6 +333,9 @@ void TouchControls::applyLayout(const ButtonLayout &layout)
 			// Chat is shown by default, so chat_hide_btn.png is shown first.
 			addToggleButton(m_buttons, id, "chat_hide_btn.png",
 					"chat_show_btn.png", rect, true);
+		else if (id == voice_id)
+			addToggleButton(m_buttons, id, "voice_btn.png", "voice_on_btn.png",
+					rect, true);
 		else if (id == overflow_id)
 			m_overflow_btn = grab_gui_element<IGUIImage>(
 					makeButtonDirect(id, rect, true));
@@ -348,6 +364,9 @@ void TouchControls::applyLayout(const ButtonLayout &layout)
 			// Chat is shown by default, so chat_hide_btn.png is shown first.
 			addToggleButton(m_overflow_buttons, id, "chat_hide_btn.png",
 					"chat_show_btn.png", rect, false);
+		else if (id == voice_id)
+			addToggleButton(m_overflow_buttons, id, "voice_btn.png",
+					"voice_on_btn.png", rect, false);
 		else
 			addButton(m_overflow_buttons, id, button_image_names[id], rect, false);
 
@@ -1061,6 +1080,15 @@ void TouchControls::updateVisibility()
 
 	for (auto &b : m_rts_buttons)
 		b.image->setVisible(m_visible && m_rts_mode);
+}
+
+bool TouchControls::isVoiceToggled() const
+{
+	for (const auto *list : {&m_buttons, &m_overflow_buttons})
+		for (const button_info &btn : *list)
+			if (btn.id == voice_id && btn.toggleable == button_info::SECOND_TEXTURE)
+				return true;
+	return false;
 }
 
 void TouchControls::releaseAll()
