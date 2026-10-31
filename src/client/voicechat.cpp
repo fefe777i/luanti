@@ -363,8 +363,7 @@ void VoiceChat::processCaptureFrame(s16 *frame)
 		trigger = m_ptt.load();
 		hangover_frames = 8; // 160 ms, don't cut off the end of the last word
 	} else {
-		// the key/touch button also works in this mode, to force talking
-		trigger = level > m_vad_threshold.load() || m_ptt.load();
+		trigger = level > m_vad_threshold.load();
 		hangover_frames = 20; // 400 ms
 	}
 
