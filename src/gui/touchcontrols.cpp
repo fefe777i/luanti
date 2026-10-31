@@ -173,6 +173,8 @@ static GameKeyType id_to_action(touch_gui_button_id id)
 			return KeyType::TOGGLE_CHAT;
 		case chat_id:
 			return KeyType::CHAT;
+		case voice_id:
+			return KeyType::VOICE;
 		case inventory_id:
 			return KeyType::INVENTORY;
 		case drop_id:

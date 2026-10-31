@@ -153,6 +153,7 @@ are placeholders intended to be overwritten by the game.
 * `overflow_btn.png`
 
 * `chat_btn.png`
+* `voice_btn.png`
 * `inventory_btn.png`
 * `drop_btn.png`
 * `exit_btn.png`

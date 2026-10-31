@@ -45,6 +45,7 @@ const char *button_names[] = {
 	"range",
 	"minimap",
 	"toggle_chat",
+	"voice",
 
 	"joystick_off",
 	"joystick_bg",
@@ -75,6 +76,7 @@ const char *button_titles[] = {
 	N_("Range select"),
 	N_("Toggle minimap"),
 	N_("Toggle chat log"),
+	N_("Voice chat (push-to-talk)"),
 
 	N_("Joystick"),
 	N_("Joystick"),
@@ -105,6 +107,7 @@ const char *button_image_names[] = {
 	"minimap_btn.png",
 	// toggle button: switches between "chat_hide_btn.png" and "chat_show_btn.png"
 	"chat_hide_btn.png",
+	"voice_btn.png",
 
 	"joystick_off.png",
 	"joystick_bg.png",
