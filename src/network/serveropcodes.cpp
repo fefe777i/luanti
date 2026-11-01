@@ -98,6 +98,7 @@ const ToServerCommandHandler toServerCommandTable[TOSERVER_NUM_MSG_TYPES] =
 	{ "TOSERVER_HUD_TOUCH",                TOSERVER_STATE_INGAME, &Server::handleCommand_HudTouch }, // 0x54
 	{ "TOSERVER_VOICE_HELLO",              TOSERVER_STATE_INGAME, &Server::handleCommand_VoiceHello }, // 0x55
 	{ "TOSERVER_VOICE",                    TOSERVER_STATE_INGAME, &Server::handleCommand_Voice }, // 0x56
+	{ "TOSERVER_VOICE_MUTE",               TOSERVER_STATE_INGAME, &Server::handleCommand_VoiceMute }, // 0x57
 };
 
 const static ClientCommandFactory null_command_factory = { nullptr, 0, false };

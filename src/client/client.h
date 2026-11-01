@@ -421,6 +421,12 @@ public:
 	// Voice chat (see voicechat.h)
 	void setVoicePushToTalk(bool down);
 	bool isVoiceTransmitting() const;
+	VoiceChat *getVoiceChat() { return m_voice.get(); }
+	// Creates the voice chat if it isn't running yet (also when the mode
+	// is "off", so the menu can switch it on).
+	void voiceStart(bool force = false);
+	// Text for the screen: who is speaking, muted microphone...
+	std::wstring getVoiceHudText();
 
 	inline void pushToChatQueue(ChatMessage *cec)
 	{
@@ -523,7 +529,6 @@ private:
 	float m_ws47_skin_timer = -1.0f;
 
 	std::unique_ptr<VoiceChat> m_voice;
-	void voiceStart();
 	void voiceStep(float dtime);
 	int m_playerpos_repeat_count = 0;
 	IntervalLimiter m_map_timer_and_unload_interval;

@@ -1455,6 +1455,8 @@ void Game::processKeyInput()
 			toggleAutoforward();
 	} else if (wasKeyDown(KeyType::INVENTORY)) {
 		m_game_formspec.showPlayerInventory(nullptr);
+	} else if (wasKeyDown(KeyType::VOICE_MENU)) {
+		m_game_formspec.showVoiceMenu();
 	} else if (input->cancelPressed()) {
 #ifdef __ANDROID__
 		m_android_chat_open = false;
@@ -3744,6 +3746,7 @@ void Game::updateFrame(ProfilerGraph *graph, RunStats *stats, f32 dtime,
 		updateShadows();
 	}
 
+	m_game_ui->setVoiceText(client->getVoiceHudText());
 	m_game_ui->update(*stats, client, draw_control, cam, runData.pointed_old,
 			gui_chat_console.get(), dtime);
 

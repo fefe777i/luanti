@@ -25,7 +25,9 @@
 #include <deque>
 #include <memory>
 #include <mutex>
+#include <set>
 #include <string>
+#include <vector>
 #include <unordered_map>
 
 #if USE_SOUND
@@ -41,6 +43,15 @@ public:
 		std::string data;
 	};
 
+	// Something the server has to be told: the player deafened themselves
+	// or muted someone (see TOSERVER_VOICE_MUTE).
+	struct SyncMsg
+	{
+		u8 kind; // 0 = deafen, 1 = mute a player
+		std::string name;
+		bool on;
+	};
+
 	VoiceChat();
 	~VoiceChat() override;
 
@@ -51,8 +62,26 @@ public:
 	void onHelloTimeout();
 
 	// Decrypts and queues a voice frame of another player.
-	void onVoicePacket(u16 speaker, const voicesession::Pos &pos, u32 ctr,
-			const std::string &ct);
+	void onVoicePacket(u16 speaker, const std::string &name,
+			const voicesession::Pos &pos, u32 ctr, const std::string &ct);
+
+	// "Microphone off": nothing is transmitted and the device is released.
+	void setMicMuted(bool muted);
+	bool isMicMuted() const { return m_mic_muted; }
+	// "Voice chat sound off": nobody can be heard.
+	void setDeafened(bool deaf);
+	bool isDeafened() const { return m_deafened; }
+	void setPlayerMuted(const std::string &name, bool muted);
+	bool isPlayerMuted(const std::string &name) const
+	{
+		return m_muted_players.count(name) != 0;
+	}
+	// Names of the players who talked in the last moment.
+	std::vector<std::string> getSpeakingNames();
+	// Changes for the server (main thread).
+	bool popSync(SyncMsg &msg);
+	// Microphones that can be picked.
+	static std::vector<std::string> listInputDevices();
 
 	// Main thread, once per frame: settings, microphone permission.
 	void step(float dtime);
@@ -102,6 +131,15 @@ private:
 	bool m_hello_answered = false;
 
 	// --- shared state
+	std::atomic<bool> m_mic_muted{false};
+	std::atomic<bool> m_deafened{false};
+	std::set<std::string> m_muted_players; // main thread
+	std::deque<SyncMsg> m_sync_queue; // main thread
+	std::unordered_map<u16, std::pair<std::string, u64>> m_speakers; // main thread
+	std::string m_device_name; // protected by m_mutex
+	void saveMutedPlayers();
+	void queueFullSync();
+
 	std::atomic<bool> m_active{false}; // handshake done, voice chat in use
 	std::atomic<bool> m_keys_ready{false};
 	std::atomic<bool> m_ptt{false};
@@ -140,6 +178,7 @@ private:
 
 	// --- voice thread only
 	ALCdevice *m_capture = nullptr;
+	std::string m_capture_device; // device name that m_capture was opened with
 	u64 m_capture_retry_ms = 0;
 	bool m_capture_failed_reported = false;
 	std::deque<s16> m_capture_buf;

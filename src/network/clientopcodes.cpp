@@ -219,4 +219,5 @@ const ServerCommandFactory serverCommandFactoryTable[TOSERVER_NUM_MSG_TYPES] =
 	{ "TOSERVER_HUD_TOUCH",          0, true }, // 0x54
 	{ "TOSERVER_VOICE_HELLO",        0, true }, // 0x55
 	{ "TOSERVER_VOICE",              0, false }, // 0x56
+	{ "TOSERVER_VOICE_MUTE",         0, true }, // 0x57
 };

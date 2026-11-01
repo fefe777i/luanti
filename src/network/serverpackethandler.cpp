@@ -903,6 +903,34 @@ void Server::handleCommand_VoiceHello(NetworkPacket *pkt)
 	Send(&resp);
 }
 
+void Server::handleCommand_VoiceMute(NetworkPacket *pkt)
+{
+	auto it = m_voice_sessions.find(pkt->getPeerId());
+	if (it == m_voice_sessions.end())
+		return;
+	VoiceSession &vs = it->second;
+
+	u8 kind = 0;
+	*pkt >> kind;
+	if (kind == 0) {
+		u8 on = 0;
+		*pkt >> on;
+		vs.deaf = on != 0;
+	} else if (kind == 1) {
+		std::string name;
+		u8 on = 0;
+		*pkt >> name >> on;
+		if (name.empty() || name.size() > 64)
+			return;
+		if (on) {
+			if (vs.muted.size() < 256)
+				vs.muted.insert(name);
+		} else {
+			vs.muted.erase(name);
+		}
+	}
+}
+
 void Server::handleCommand_Voice(NetworkPacket *pkt)
 {
 	if (!m_voice_enabled)
@@ -974,12 +1002,14 @@ void Server::handleCommand_Voice(NetworkPacket *pkt)
 			continue;
 
 		VoiceSession &lvs = entry.second;
+		if (lvs.deaf || lvs.muted.count(speaker->getName()))
+			continue;
 		u32 out_ctr = lvs.tx_counter++;
 		std::string sealed = voicesession::sealDownlink(lvs.key_s2c, peer_id, pos,
 				out_ctr, plain, sizeof(plain));
 
 		NetworkPacket out(TOCLIENT_VOICE, 0, listener_id);
-		out << (u16)peer_id << (s32)pos.x << (s32)pos.y << (s32)pos.z
+		out << (u16)peer_id << speaker->getName() << (s32)pos.x << (s32)pos.y << (s32)pos.z
 			<< out_ctr << sealed;
 		Send(&out);
 	}

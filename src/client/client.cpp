@@ -1577,11 +1577,11 @@ void Client::sendReady()
 	voiceStart();
 }
 
-void Client::voiceStart()
+void Client::voiceStart(bool force)
 {
 	if (m_voice)
 		return;
-	if (g_settings->get("voice_chat_mode") == "off")
+	if (!force && g_settings->get("voice_chat_mode") == "off")
 		return;
 	m_voice = std::make_unique<VoiceChat>();
 }
@@ -1610,6 +1610,16 @@ void Client::voiceStep(float dtime)
 		Send(&pkt);
 	}
 
+	VoiceChat::SyncMsg sync;
+	for (int i = 0; i < 16 && m_voice->popSync(sync); i++) {
+		NetworkPacket pkt(TOSERVER_VOICE_MUTE, 0);
+		pkt << (u8)sync.kind;
+		if (sync.kind == 1)
+			pkt << sync.name;
+		pkt << (u8)sync.on;
+		Send(&pkt);
+	}
+
 	std::string msg;
 	while (m_voice->popStatus(msg)) {
 		pushToChatQueue(new ChatMessage(CHATMESSAGE_TYPE_SYSTEM,
@@ -1621,6 +1631,27 @@ void Client::setVoicePushToTalk(bool down)
 {
 	if (m_voice)
 		m_voice->setPushToTalk(down);
+}
+
+std::wstring Client::getVoiceHudText()
+{
+	if (!m_voice)
+		return L"";
+	std::string text;
+	std::vector<std::string> names = m_voice->getSpeakingNames();
+	if (m_voice->isTransmitting())
+		names.insert(names.begin(), gettext("You"));
+	if (!names.empty()) {
+		text = gettext("Speaking: ");
+		for (size_t i = 0; i < names.size(); i++)
+			text += (i ? ", " : "") + names[i];
+	}
+	std::string mode = g_settings->get("voice_chat_mode");
+	if (m_voice->isDeafened())
+		text += std::string(text.empty() ? "" : "\n") + gettext("Voice chat sound is off");
+	else if (m_voice->isMicMuted() && (mode == "ptt" || mode == "vad"))
+		text += std::string(text.empty() ? "" : "\n") + gettext("Microphone is off");
+	return utf8_to_wide(text);
 }
 
 bool Client::isVoiceTransmitting() const

@@ -57,6 +57,7 @@ public:
 	const Flags &getFlags() const { return m_flags; }
 
 	inline void setInfoText(const std::wstring &str) { m_infotext = str; }
+	inline void setVoiceText(const std::wstring &str) { m_voicetext = str; }
 	inline void clearInfoText() { m_infotext.clear(); }
 
 	inline void showStatusText(const std::wstring &str)
@@ -95,6 +96,8 @@ private:
 	gui::IGUIStaticText *m_guitext2 = nullptr; // Second line of debug text
 
 	gui::IGUIStaticText *m_guitext_info = nullptr; // At the middle of the screen
+	gui::IGUIStaticText *m_guitext_voice = nullptr; // Voice chat: who is speaking
+	std::wstring m_voicetext;
 	std::wstring m_infotext;
 
 	std::unique_ptr<StatusTextHelper> m_status_text = nullptr;

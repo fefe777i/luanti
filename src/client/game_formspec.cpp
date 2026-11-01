@@ -20,6 +20,10 @@
 #include "gui/guiOpenURL.h"
 #include "gui/guiVolumeChange.h"
 #include "localplayer.h"
+#include "client/voicechat.h"
+#include "settings.h"
+#include "util/string.h"
+#include <cmath>
 
 /*
 	Text input system
@@ -465,6 +469,249 @@ void GameFormSpec::showPauseMenu()
 	m_formspec->setFocus("btn_continue");
 	// game will be paused in next step, if in singleplayer (see Game::m_is_paused)
 	m_formspec->doPause = true;
+}
+
+
+/*
+	Voice chat menu
+*/
+
+namespace
+{
+const char *const VOICE_MODES[] = {"ptt", "vad", "listen", "off"};
+constexpr int VOICE_MODE_COUNT = 4;
+
+// Slider values arrive as "CHG:123" while they are dragged
+bool parseSliderChange(const StringMap &fields, const char *name, int &value)
+{
+	auto it = fields.find(name);
+	if (it == fields.end() || it->second.compare(0, 4, "CHG:") != 0)
+		return false;
+	value = mystoi(it->second.substr(4));
+	return true;
+}
+}
+
+// Builds the formspec of the voice chat menu. It is only rebuilt when
+// something changed (a button was pressed, someone joined or left), never
+// while a slider is dragged, or the slider would jump.
+class VoiceMenuFormSource : public IFormSource
+{
+public:
+	VoiceMenuFormSource(Client *client) : m_client(client) { rebuild(); }
+
+	const std::string &getForm() const override
+	{
+		if (m_dirty || playerNames() != m_names)
+			rebuild();
+		return m_form;
+	}
+
+	void markDirty() { m_dirty = true; }
+	const std::vector<std::string> &names() const { return m_names; }
+	const std::vector<std::string> &devices() const { return m_devices; }
+
+private:
+	std::vector<std::string> playerNames() const
+	{
+		std::vector<std::string> names;
+		const std::string own = m_client->getEnv().getLocalPlayer()->getName();
+		for (const std::string &name : m_client->getConnectedPlayerNames())
+			if (name != own)
+				names.push_back(name);
+		return names;
+	}
+
+	static std::string escape(std::string s)
+	{
+		str_formspec_escape(s);
+		for (char &c : s)
+			if (c == ',')
+				c = ' ';
+		return s;
+	}
+
+	void rebuild() const
+	{
+		m_dirty = false;
+		m_names = playerNames();
+		m_devices = VoiceChat::listInputDevices();
+
+		VoiceChat *voice = m_client->getVoiceChat();
+		const bool mic_off = voice ? voice->isMicMuted()
+				: g_settings->getBool("voice_chat_mic_muted");
+		const bool deaf = voice ? voice->isDeafened()
+				: g_settings->getBool("voice_chat_deafened");
+
+		int mode_idx = 1;
+		const std::string mode = g_settings->get("voice_chat_mode");
+		for (int i = 0; i < VOICE_MODE_COUNT; i++)
+			if (mode == VOICE_MODES[i])
+				mode_idx = i + 1;
+
+		std::string device_items = escape(strgettext("System default"));
+		int device_idx = 1;
+		const std::string wanted_device = g_settings->get("voice_chat_input_device");
+		for (size_t i = 0; i < m_devices.size(); i++) {
+			device_items += "," + escape(m_devices[i]);
+			if (m_devices[i] == wanted_device)
+				device_idx = (int)i + 2;
+		}
+
+		const std::string on = strgettext("On");
+		const std::string off = strgettext("Off");
+
+		std::ostringstream os;
+		os << "formspec_version[6]size[12,13.6]"
+			<< "label[0.5,0.6;" << escape(strgettext("Voice chat")) << "]"
+			<< "button[0.5,1.0;5.5,0.8;btn_mic;"
+			<< escape(strgettext("Microphone: ")) << (mic_off ? off : on) << "]"
+			<< "button[6.0,1.0;5.5,0.8;btn_deaf;"
+			<< escape(strgettext("Hear others: ")) << (deaf ? off : on) << "]"
+			<< "label[0.5,2.3;" << escape(strgettext("Microphone mode")) << "]"
+			<< "dropdown[0.5,2.5;5.5,0.8;mode;"
+			<< escape(strgettext("Push to talk")) << ","
+			<< escape(strgettext("Voice activation")) << ","
+			<< escape(strgettext("Listen only")) << ","
+			<< escape(strgettext("Off")) << ";" << mode_idx << ";true]"
+			<< "label[6.0,2.3;" << escape(strgettext("Microphone")) << "]"
+			<< "dropdown[6.0,2.5;5.5,0.8;device;" << device_items << ";"
+			<< device_idx << ";true]";
+
+		auto slider = [&](float y, const std::string &title, const char *name,
+				int min, int max, int value) {
+			os << "label[0.5," << y << ";" << escape(title) << "]"
+				<< "scrollbaroptions[min=" << min << ";max=" << max
+				<< ";smallstep=" << std::max(1, (max - min) / 40)
+				<< ";largestep=" << std::max(1, (max - min) / 10) << "]"
+				<< "scrollbar[0.5," << (y + 0.2f) << ";11,0.5;horizontal;"
+				<< name << ";" << value << "]";
+		};
+		slider(3.8f, strgettext("Voice volume of others"), "sb_vol", 0, 200,
+				(int)std::lround(g_settings->getFloat("voice_chat_volume") * 100));
+		slider(4.9f, strgettext("Microphone gain"), "sb_gain", 10, 400,
+				(int)std::lround(g_settings->getFloat("voice_chat_mic_gain") * 100));
+		slider(6.0f, strgettext("Voice activation threshold"), "sb_thr", 1, 300,
+				(int)std::lround(g_settings->getFloat("voice_chat_vad_threshold") * 1000));
+
+		os << "label[0.5,7.3;" << escape(strgettext("Players (press to mute)")) << "]";
+		constexpr float ROW = 0.9f, VIEW = 4.3f;
+		const float content = std::max(1.0f, m_names.size() * ROW);
+		os << "box[0.5,7.5;11,4.3;#00000060]";
+		if (m_names.empty()) {
+			os << "label[0.8,8.1;" << escape(strgettext("No other players")) << "]";
+		} else {
+			os << "scroll_container[0.5,7.5;10.4,4.3;sb_players;vertical;0.1]";
+			VoiceChat *v = voice;
+			for (size_t i = 0; i < m_names.size(); i++) {
+				const bool muted = v ? v->isPlayerMuted(m_names[i]) : false;
+				const float y = 0.1f + i * ROW;
+				os << "label[0.3," << (y + 0.4f) << ";" << escape(m_names[i]) << "]"
+					<< "button[7.4," << y << ";2.8,0.8;btn_pm_" << i << ";"
+					<< escape(muted ? strgettext("Unmute") : strgettext("Mute")) << "]";
+			}
+			os << "scroll_container_end[]";
+			if (content > VIEW) {
+				const int range = (int)std::ceil((content - VIEW + 0.2f) / 0.1f);
+				os << "scrollbaroptions[min=0;max=" << range
+					<< ";thumbsize=" << (int)(VIEW / 0.1f) << "]"
+					<< "scrollbar[10.9,7.5;0.6,4.3;vertical;sb_players;0]";
+			}
+		}
+		os << "button_exit[4,12.2;4,0.9;btn_close;" << escape(strgettext("Close")) << "]";
+		m_form = os.str();
+	}
+
+	Client *m_client;
+	mutable std::string m_form;
+	mutable bool m_dirty = true;
+	mutable std::vector<std::string> m_names;
+	mutable std::vector<std::string> m_devices;
+};
+
+struct VoiceMenuFormspecHandler : public TextDest
+{
+	VoiceMenuFormspecHandler(Client *client, VoiceMenuFormSource *source) :
+		m_client(client), m_source(source)
+	{
+		m_formname = "MT_VOICE_MENU";
+	}
+
+	void gotText(const StringMap &fields)
+	{
+		VoiceChat *voice = m_client->getVoiceChat();
+		if (!voice)
+			return;
+		auto has = [&](const char *name) { return fields.find(name) != fields.end(); };
+
+		if (has("btn_mic")) {
+			voice->setMicMuted(!voice->isMicMuted());
+			m_source->markDirty();
+		}
+		if (has("btn_deaf")) {
+			voice->setDeafened(!voice->isDeafened());
+			m_source->markDirty();
+		}
+
+		// A dropdown event carries every field, so only act on real changes.
+		auto it = fields.find("mode");
+		if (it != fields.end()) {
+			int idx = mystoi(it->second);
+			if (idx >= 1 && idx <= VOICE_MODE_COUNT &&
+					g_settings->get("voice_chat_mode") != VOICE_MODES[idx - 1]) {
+				g_settings->set("voice_chat_mode", VOICE_MODES[idx - 1]);
+				if (idx != VOICE_MODE_COUNT)
+					m_client->voiceStart(true);
+				m_source->markDirty();
+			}
+		}
+		it = fields.find("device");
+		if (it != fields.end()) {
+			int idx = mystoi(it->second);
+			const auto &devices = m_source->devices();
+			std::string name;
+			if (idx >= 2 && (size_t)(idx - 2) < devices.size())
+				name = devices[idx - 2];
+			if (idx >= 1 && g_settings->get("voice_chat_input_device") != name) {
+				g_settings->set("voice_chat_input_device", name);
+				m_source->markDirty();
+			}
+		}
+
+		int value;
+		if (parseSliderChange(fields, "sb_vol", value))
+			g_settings->setFloat("voice_chat_volume", rangelim(value, 0, 200) / 100.0f);
+		if (parseSliderChange(fields, "sb_gain", value))
+			g_settings->setFloat("voice_chat_mic_gain", rangelim(value, 10, 400) / 100.0f);
+		if (parseSliderChange(fields, "sb_thr", value))
+			g_settings->setFloat("voice_chat_vad_threshold", rangelim(value, 1, 300) / 1000.0f);
+
+		const auto &names = m_source->names();
+		for (size_t i = 0; i < names.size(); i++) {
+			if (has(("btn_pm_" + std::to_string(i)).c_str())) {
+				voice->setPlayerMuted(names[i], !voice->isPlayerMuted(names[i]));
+				m_source->markDirty();
+			}
+		}
+	}
+
+	Client *m_client;
+	VoiceMenuFormSource *m_source; // owned by the menu, which also owns us
+};
+
+void GameFormSpec::showVoiceMenu()
+{
+	m_client->voiceStart(true);
+
+	/* Note: FormspecFormSource and LocalFormspecHandler  *
+	 * are deleted by guiFormSpecMenu                     */
+	VoiceMenuFormSource *fs_src = new VoiceMenuFormSource(m_client);
+	VoiceMenuFormspecHandler *txt_dst = new VoiceMenuFormspecHandler(m_client, fs_src);
+
+	GUIFormSpecMenu::create(m_formspec, m_client, m_rendering_engine->get_gui_env(),
+			fs_src, txt_dst, m_client->getFormspecPrepend(),
+			m_client->getSoundManager());
+	m_formspec->setFocus("btn_close");
 }
 
 void GameFormSpec::showDeathFormspecLegacy()

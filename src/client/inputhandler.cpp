@@ -52,6 +52,7 @@ void MyEventReceiver::reloadKeybindings()
 	keybindings[KeyType::INVENTORY] = getKeySetting("keymap_inventory");
 	keybindings[KeyType::CHAT] = getKeySetting("keymap_chat");
 	keybindings[KeyType::VOICE] = getKeySetting("keymap_voice");
+	keybindings[KeyType::VOICE_MENU] = getKeySetting("keymap_voice_menu");
 	keybindings[KeyType::CMD] = getKeySetting("keymap_cmd");
 	keybindings[KeyType::CMD_LOCAL] = getKeySetting("keymap_cmd_local");
 	keybindings[KeyType::CONSOLE] = getKeySetting("keymap_console");

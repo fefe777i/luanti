@@ -203,6 +203,9 @@ keymap_chat (Open chat) key SYSTEM_SCANCODE_23
 #    Push-to-talk key for the voice chat.
 keymap_voice (Voice chat push-to-talk) key SYSTEM_SCANCODE_27
 
+#    Opens the voice chat menu: mute the microphone, mute players, volume...
+keymap_voice_menu (Voice chat menu) key SYSTEM_SCANCODE_19
+
 #    Key for opening the chat window to type commands.
 keymap_cmd (Command) key SYSTEM_SCANCODE_56
 

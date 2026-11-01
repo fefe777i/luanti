@@ -9,6 +9,7 @@
 #include "porting.h"
 #include "settings.h"
 #include "util/numeric.h"
+#include "util/string.h"
 #include "util/voice_codec.h"
 
 #ifdef __ANDROID__
@@ -42,6 +43,11 @@ float voiceGain(float dist, float radius)
 
 VoiceChat::VoiceChat() : Thread("VoiceChat")
 {
+	m_mic_muted = g_settings->getBool("voice_chat_mic_muted");
+	m_deafened = g_settings->getBool("voice_chat_deafened");
+	for (const std::string &name : str_split(g_settings->get("voice_chat_muted_players"), ','))
+		if (!name.empty())
+			m_muted_players.insert(name);
 }
 
 VoiceChat::~VoiceChat()
@@ -99,6 +105,7 @@ void VoiceChat::onServerHello(bool enabled, const uint8_t *server_pub, float rad
 	m_radius = std::max(1.0f, radius);
 	m_keys_ready = true;
 	m_active = true;
+	queueFullSync();
 	start();
 
 	switch (m_mode.load()) {
@@ -119,10 +126,12 @@ void VoiceChat::onHelloTimeout()
 	pushStatus(N_("This server does not support voice chat."));
 }
 
-void VoiceChat::onVoicePacket(u16 speaker, const voicesession::Pos &pos, u32 ctr,
-		const std::string &ct)
+void VoiceChat::onVoicePacket(u16 speaker, const std::string &name,
+		const voicesession::Pos &pos, u32 ctr, const std::string &ct)
 {
-	if (!m_active || m_mode.load() == MODE_OFF)
+	if (!m_active || m_mode.load() == MODE_OFF || m_deafened)
+		return;
+	if (m_muted_players.count(name))
 		return;
 	if (!m_rx_window.check(ctr))
 		return;
@@ -131,6 +140,7 @@ void VoiceChat::onVoicePacket(u16 speaker, const voicesession::Pos &pos, u32 ctr
 	if (!voicesession::openDownlink(m_key_s2c, speaker, pos, ctr, ct, plain))
 		return;
 	m_rx_window.commit(ctr);
+	m_speakers[speaker] = {name, porting::getTimeMs()};
 
 	RxFrame rx;
 	rx.speaker = speaker;
@@ -181,6 +191,10 @@ void VoiceChat::step(float dtime)
 		m_vad_threshold = rangelim(
 				g_settings->getFloat("voice_chat_vad_threshold"), 0.001f, 0.5f);
 		m_volume = rangelim(g_settings->getFloat("voice_chat_volume"), 0.0f, 2.0f);
+		{
+			std::lock_guard<std::mutex> lock(m_mutex);
+			m_device_name = g_settings->get("voice_chat_input_device");
+		}
 	}
 
 	const int mode = m_mode.load();
@@ -203,6 +217,94 @@ void VoiceChat::step(float dtime)
 	// Desktop systems ask (or silently allow) when the device is opened.
 	m_mic_permitted = needs_mic;
 #endif
+}
+
+void VoiceChat::queueFullSync()
+{
+	m_sync_queue.clear();
+	if (m_deafened)
+		m_sync_queue.push_back({0, "", true});
+	for (const std::string &name : m_muted_players)
+		m_sync_queue.push_back({1, name, true});
+}
+
+void VoiceChat::saveMutedPlayers()
+{
+	std::string joined;
+	for (const std::string &name : m_muted_players) {
+		if (!joined.empty())
+			joined += ',';
+		joined += name;
+	}
+	g_settings->set("voice_chat_muted_players", joined);
+}
+
+void VoiceChat::setMicMuted(bool muted)
+{
+	m_mic_muted = muted;
+	g_settings->setBool("voice_chat_mic_muted", muted);
+}
+
+void VoiceChat::setDeafened(bool deaf)
+{
+	if (m_deafened == deaf)
+		return;
+	m_deafened = deaf;
+	g_settings->setBool("voice_chat_deafened", deaf);
+	if (m_active)
+		m_sync_queue.push_back({0, "", deaf});
+}
+
+void VoiceChat::setPlayerMuted(const std::string &name, bool muted)
+{
+	if (name.empty())
+		return;
+	bool changed = muted ? m_muted_players.insert(name).second
+			: m_muted_players.erase(name) > 0;
+	if (!changed)
+		return;
+	saveMutedPlayers();
+	if (m_active)
+		m_sync_queue.push_back({1, name, muted});
+}
+
+std::vector<std::string> VoiceChat::getSpeakingNames()
+{
+	const u64 now = porting::getTimeMs();
+	std::vector<std::string> names;
+	for (auto it = m_speakers.begin(); it != m_speakers.end();) {
+		const u64 age = now - it->second.second;
+		if (age > 5000) {
+			it = m_speakers.erase(it);
+			continue;
+		}
+		if (age < 400)
+			names.push_back(it->second.first);
+		++it;
+	}
+	return names;
+}
+
+bool VoiceChat::popSync(SyncMsg &msg)
+{
+	if (m_sync_queue.empty())
+		return false;
+	msg = std::move(m_sync_queue.front());
+	m_sync_queue.pop_front();
+	return true;
+}
+
+std::vector<std::string> VoiceChat::listInputDevices()
+{
+	std::vector<std::string> devices;
+#if USE_SOUND
+	const ALCchar *list = alcGetString(nullptr, ALC_CAPTURE_DEVICE_SPECIFIER);
+	while (list && *list) {
+		devices.emplace_back(list);
+		list += strlen(list) + 1;
+	}
+#endif
+	return devices;
 }
 
 bool VoiceChat::popOutgoing(OutPacket &out)
@@ -291,7 +393,12 @@ void VoiceChat::closeCapture()
 void VoiceChat::updateCapture()
 {
 	const int mode = m_mode.load();
-	const bool want = m_keys_ready && m_mic_permitted &&
+	std::string wanted_device;
+	{
+		std::lock_guard<std::mutex> lock(m_mutex);
+		wanted_device = m_device_name;
+	}
+	const bool want = m_keys_ready && m_mic_permitted && !m_mic_muted &&
 			(mode == MODE_PTT || mode == MODE_VAD);
 	if (!want) {
 		if (m_capture)
@@ -299,12 +406,26 @@ void VoiceChat::updateCapture()
 		return;
 	}
 
+	// another microphone was picked
+	if (m_capture && wanted_device != m_capture_device)
+		closeCapture();
+
 	if (!m_capture) {
 		const u64 now = porting::getTimeMs();
 		if (now < m_capture_retry_ms)
 			return;
-		m_capture = alcCaptureOpenDevice(nullptr, voicecodec::SAMPLE_RATE,
-				AL_FORMAT_MONO16, voicecodec::SAMPLE_RATE / 2);
+		if (!wanted_device.empty())
+			m_capture = alcCaptureOpenDevice(wanted_device.c_str(),
+					voicecodec::SAMPLE_RATE, AL_FORMAT_MONO16,
+					voicecodec::SAMPLE_RATE / 2);
+		if (m_capture) {
+			m_capture_device = wanted_device;
+		} else {
+			// no choice made, or the chosen one is gone: system default
+			m_capture = alcCaptureOpenDevice(nullptr, voicecodec::SAMPLE_RATE,
+					AL_FORMAT_MONO16, voicecodec::SAMPLE_RATE / 2);
+			m_capture_device = wanted_device;
+		}
 		if (!m_capture) {
 			m_capture_retry_ms = now + 5000;
 			if (!m_capture_failed_reported) {

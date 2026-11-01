@@ -39,6 +39,8 @@ struct GameFormSpec
 	void showDeathFormspecLegacy();
 	// Shows the hardcoded "main" pause menu.
 	void showPauseMenu();
+	// Voice chat menu: microphone, volumes, muting players.
+	void showVoiceMenu();
 
 	void update();
 	void disableDebugView();

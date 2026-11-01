@@ -65,6 +65,14 @@ void GameUI::init()
 			(g_settings->getU16("recent_chat_messages") + 3)),
 			false, true, guiroot);
 
+	// Voice chat: who is speaking, below the info text
+	m_guitext_voice = gui::StaticText::add(guienv, L"",
+		core::rect<s32>(0, 0, 400, g_fontengine->getTextHeight() * 3) +
+			v2s32(100, chat_font_height *
+			(g_settings->getU16("recent_chat_messages") + 3) +
+			g_fontengine->getTextHeight() * 7),
+			false, true, guiroot);
+
 	// Status message for in-game notifications (fly/fast mode, volume changes, etc.)
 	m_status_text = std::make_unique<StatusTextHelper>(guienv, guiroot);
 	m_status_text->setGameStyle();
@@ -157,6 +165,10 @@ void GameUI::update(const RunStats &stats, Client *client, MapDrawControl *draw_
 
 	setStaticText(m_guitext_info, m_infotext.c_str());
 	m_guitext_info->setVisible(m_flags.show_hud && g_menumgr.menuCount() == 0);
+
+	setStaticText(m_guitext_voice, m_voicetext.c_str());
+	m_guitext_voice->setVisible(m_flags.show_hud && g_menumgr.menuCount() == 0 &&
+			!m_voicetext.empty());
 
 	// Update status message element
 	if (m_status_text) {
@@ -312,6 +324,10 @@ void GameUI::clearText()
 		m_guitext2 = nullptr;
 	}
 
+	if (m_guitext_voice) {
+		m_guitext_voice->remove();
+		m_guitext_voice = nullptr;
+	}
 	if (m_guitext_info) {
 		m_guitext_info->remove();
 		m_guitext_info = nullptr;

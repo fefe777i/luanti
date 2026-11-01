@@ -20,6 +20,7 @@
 #include "translation.h"
 #include "sound_spec.h"
 #include "util/voice_crypto.h"
+#include <set>
 #include <atomic>
 #include <csignal>
 #include <string>
@@ -247,6 +248,7 @@ public:
 	void handleCommand_HudTouch(NetworkPacket *pkt);
 	void handleCommand_VoiceHello(NetworkPacket *pkt);
 	void handleCommand_Voice(NetworkPacket *pkt);
+	void handleCommand_VoiceMute(NetworkPacket *pkt);
 
 	void ProcessData(NetworkPacket *pkt);
 
@@ -839,6 +841,9 @@ private:
 		// "shout" privilege is cached, looking it up calls into Lua
 		u64 priv_checked_ms = 0;
 		bool may_speak = false;
+		// what this player doesn't want to hear
+		bool deaf = false;
+		std::set<std::string> muted;
 	};
 	std::unordered_map<session_t, VoiceSession> m_voice_sessions;
 	bool m_voice_enabled = true;

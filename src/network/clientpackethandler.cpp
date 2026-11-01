@@ -1981,9 +1981,11 @@ void Client::handleCommand_Voice(NetworkPacket *pkt)
 	u16 speaker = 0;
 	s32 x = 0, y = 0, z = 0;
 	u32 ctr = 0;
-	std::string ct;
-	*pkt >> speaker >> x >> y >> z >> ctr >> ct;
-	m_voice->onVoicePacket(speaker, voicesession::Pos{x, y, z}, ctr, ct);
+	std::string name, ct;
+	*pkt >> speaker >> name >> x >> y >> z >> ctr >> ct;
+	if (name.size() > 64)
+		return;
+	m_voice->onVoicePacket(speaker, name, voicesession::Pos{x, y, z}, ctr, ct);
 }
 
 void Client::handleCommand_ChatCommands(NetworkPacket *pkt)

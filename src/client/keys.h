@@ -34,6 +34,7 @@ public:
 		INVENTORY,
 		CHAT,
 		VOICE,
+		VOICE_MENU,
 		CMD,
 		CMD_LOCAL,
 		CONSOLE,

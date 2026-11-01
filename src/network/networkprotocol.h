@@ -751,6 +751,7 @@ enum ToClientCommand : u16
 		A voice frame from a nearby player (unreliable).
 		Older clients ignore this command.
 		u16 speaker peer id
+		std::string speaker player name
 		s32 x, y, z: position of the speaker in hundredths of a node
 		u32 counter (nonce of this packet for this receiver)
 		std::string ChaCha20-Poly1305(u32 speaker sequence + ADPCM frame)
@@ -987,7 +988,16 @@ enum ToServerCommand : u16
 		  key = client->server key, AAD = 1
 	*/
 
-	TOSERVER_NUM_MSG_TYPES = 0x57,
+	TOSERVER_VOICE_MUTE = 0x57,
+	/*
+		The player doesn't want to hear someone / anyone (the server stops
+		sending the voices, saves bandwidth).
+		u8 kind: 0 = deafen, 1 = mute one player
+		kind 0: u8 on
+		kind 1: std::string player name, u8 on
+	*/
+
+	TOSERVER_NUM_MSG_TYPES = 0x58,
 };
 
 enum AuthMechanism

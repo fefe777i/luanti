@@ -155,6 +155,7 @@ are placeholders intended to be overwritten by the game.
 * `chat_btn.png`
 * `voice_btn.png`
 * `voice_on_btn.png`
+* `voice_menu_btn.png`
 * `inventory_btn.png`
 * `drop_btn.png`
 * `exit_btn.png`

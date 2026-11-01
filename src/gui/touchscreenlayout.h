@@ -56,6 +56,7 @@ enum touch_gui_button_id : u8
 	minimap_id,
 	toggle_chat_id,
 	voice_id, // voice chat push-to-talk
+	voice_menu_id,
 
 	// the joystick
 	joystick_off_id,
