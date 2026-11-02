@@ -3,6 +3,11 @@
 // Copyright (C) 2010-2013 celeron55, Perttu Ahola <celeron55@gmail.com>
 
 #include "server.h"
+#include "dimension.h"
+#include "threading/mutex_auto_lock.h"
+#include <mutex>
+#include <map>
+#include <memory>
 
 #include "activeobject.h"
 #include "chat_interface.h"
@@ -281,6 +286,142 @@ static void enrich_exception(BaseException &e, const NetworkPacket &pkt, bool in
 	Server
 */
 
+namespace {
+// The game settings layer is process-global, but several servers (one per
+// dimension) can run in one process: they share one layer, which is freed
+// together with the last server.
+std::mutex g_game_settings_mutex;
+int g_game_settings_refs = 0;
+
+Settings *acquireGameSettingsLayer()
+{
+	MutexAutoLock lock(g_game_settings_mutex);
+	Settings *layer = Settings::getLayer(SL_GAME);
+	if (!layer)
+		layer = Settings::createLayer(SL_GAME);
+	g_game_settings_refs++;
+	return layer;
+}
+
+void releaseGameSettingsLayer(Settings *layer)
+{
+	if (!layer)
+		return;
+	MutexAutoLock lock(g_game_settings_mutex);
+	if (--g_game_settings_refs <= 0) {
+		g_game_settings_refs = 0;
+		delete layer;
+	}
+}
+
+// All servers of one world in this process (one per dimension) share ONE mod
+// storage connection. Separate SQLite connections lock each other out, because
+// every server keeps a write transaction open between its periodic saves
+// ("database is locked").
+struct SharedModStorage
+{
+	std::unique_ptr<ModStorageDatabase> db;
+	std::mutex mutex;
+	bool saving = false; // a transaction is open
+};
+
+std::mutex g_mod_storage_mutex;
+std::map<std::string, std::weak_ptr<SharedModStorage>> g_mod_storages;
+
+// Per-server handle: every call is serialized on the shared connection.
+class ModStorageProxy final : public ModStorageDatabase
+{
+public:
+	explicit ModStorageProxy(std::shared_ptr<SharedModStorage> shared) :
+		m_s(std::move(shared)) {}
+
+	void beginSave() override
+	{
+		MutexAutoLock lock(m_s->mutex);
+		if (!m_s->saving) {
+			m_s->db->beginSave();
+			m_s->saving = true;
+		}
+	}
+	void endSave() override
+	{
+		MutexAutoLock lock(m_s->mutex);
+		if (m_s->saving) {
+			m_s->saving = false;
+			m_s->db->endSave();
+		}
+	}
+	bool initialized() const override { return m_s->db->initialized(); }
+	void verifyDatabase() override
+	{
+		MutexAutoLock lock(m_s->mutex);
+		m_s->db->verifyDatabase();
+	}
+
+	void getModEntries(const std::string &modname, StringMap *storage) override
+	{
+		MutexAutoLock lock(m_s->mutex);
+		m_s->db->getModEntries(modname, storage);
+	}
+	void getModKeys(const std::string &modname,
+			std::vector<std::string> *storage) override
+	{
+		MutexAutoLock lock(m_s->mutex);
+		m_s->db->getModKeys(modname, storage);
+	}
+	bool hasModEntry(const std::string &modname, const std::string &key) override
+	{
+		MutexAutoLock lock(m_s->mutex);
+		return m_s->db->hasModEntry(modname, key);
+	}
+	bool getModEntry(const std::string &modname, const std::string &key,
+			std::string *value) override
+	{
+		MutexAutoLock lock(m_s->mutex);
+		return m_s->db->getModEntry(modname, key, value);
+	}
+	bool setModEntry(const std::string &modname, const std::string &key,
+			std::string_view value) override
+	{
+		MutexAutoLock lock(m_s->mutex);
+		return m_s->db->setModEntry(modname, key, value);
+	}
+	bool removeModEntry(const std::string &modname, const std::string &key) override
+	{
+		MutexAutoLock lock(m_s->mutex);
+		return m_s->db->removeModEntry(modname, key);
+	}
+	bool removeModEntries(const std::string &modname) override
+	{
+		MutexAutoLock lock(m_s->mutex);
+		return m_s->db->removeModEntries(modname);
+	}
+	void listMods(std::vector<std::string> *res) override
+	{
+		MutexAutoLock lock(m_s->mutex);
+		m_s->db->listMods(res);
+	}
+
+private:
+	std::shared_ptr<SharedModStorage> m_s;
+};
+
+ModStorageDatabase *openSharedModStorage(const std::string &world_path)
+{
+	MutexAutoLock lock(g_mod_storage_mutex);
+	std::shared_ptr<SharedModStorage> shared;
+	auto it = g_mod_storages.find(world_path);
+	if (it != g_mod_storages.end())
+		shared = it->second.lock();
+	if (!shared) {
+		shared = std::make_shared<SharedModStorage>();
+		shared->db.reset(Server::openModStorageDatabase(world_path));
+		g_mod_storages[world_path] = shared;
+	}
+	return new ModStorageProxy(std::move(shared));
+}
+}
+
 Server::Server(
 		const std::string &path_world,
 		const SubgameSpec &gamespec,
@@ -288,7 +429,8 @@ Server::Server(
 		Address bind_addr,
 		bool dedicated,
 		ChatInterface *iface,
-		std::string *shutdown_errmsg
+		std::string *shutdown_errmsg,
+		const std::string &bound_dimension
 	):
 	m_bind_addr(bind_addr),
 	m_path_world(path_world),
@@ -305,6 +447,8 @@ Server::Server(
 	m_shutdown_errmsg(shutdown_errmsg),
 	m_modchannel_mgr(new ModChannelMgr())
 {
+	m_bound_dimension = bound_dimension;
+
 	if (m_path_world.empty())
 		throw ServerError("Supplied empty world path");
 
@@ -451,7 +595,8 @@ Server::~Server()
 	}
 
 	// Delete the rest in the reverse order of creation
-	delete m_game_settings;
+	releaseGameSettingsLayer(m_game_settings);
+	m_game_settings = nullptr;
 	delete m_banmanager;
 	delete m_mod_storage_database;
 	delete m_rollback;
@@ -476,7 +621,7 @@ void Server::init()
 	infostream << "- world:  " << m_path_world << std::endl;
 	infostream << "- game:   " << m_gamespec.path << std::endl;
 
-	m_game_settings = Settings::createLayer(SL_GAME);
+	m_game_settings = acquireGameSettingsLayer();
 
 	// Create world if it doesn't exist
 	try {
@@ -495,7 +640,7 @@ void Server::init()
 	m_banmanager = new BanManager(ban_path);
 
 	// Create mod storage database and begin a save for later
-	m_mod_storage_database = openModStorageDatabase(m_path_world);
+	m_mod_storage_database = openSharedModStorage(m_path_world);
 	m_mod_storage_database->beginSave();
 
 	m_modmgr = std::make_unique<ServerModManager>(m_path_world, m_gamespec);
@@ -509,10 +654,30 @@ void Server::init()
 	//lock environment
 	EnvAutoLock envlock(this);
 
+	// Every dimension has its own map directory ("overworld" is the world folder)
+	// A server can be bound to one dimension with the "dimension" setting
+	// (every dimension as its own server, see doc/dimensions.md). Otherwise the
+	// world opens in the dimension saved in current_dimension.txt.
+	std::string configured_dimension = m_bound_dimension;
+	if (!configured_dimension.empty() ||
+			(g_settings->getNoEx("dimension", configured_dimension) &&
+			!configured_dimension.empty())) {
+		if (!dimension::exists(m_path_world, configured_dimension)) {
+			throw ServerError("Dimension \"" + configured_dimension +
+				"\" does not exist. Create it first (/newdimension on the main "
+				"server) and then start this server.");
+		}
+		m_dimension = configured_dimension;
+	} else {
+		m_dimension = dimension::loadCurrent(m_path_world);
+	}
+	const std::string map_path = dimension::getMapPath(m_path_world, m_dimension);
+	infostream << "- dimension: " << m_dimension << " [" << map_path << "]" << std::endl;
+
 	// Create the Map (loads map_meta.txt, overriding configured mapgen params)
 	std::unique_ptr<ServerMap> startup_server_map;
 	try {
-		startup_server_map = std::make_unique<ServerMap>(m_path_world, this,
+		startup_server_map = std::make_unique<ServerMap>(map_path, this,
 				m_emerge.get(), m_metrics_backend.get());
 	} catch (DatabaseException &e) {
 		throw ServerError(std::string(
@@ -822,7 +987,7 @@ void Server::AsyncRunStep(float dtime, bool initial_step)
 	// send masterserver announce
 	{
 		float &counter = m_masterserver_timer;
-		if (!isSingleplayer() && (!counter || counter >= 300.0) &&
+		if (!isSingleplayer() && m_announce && (!counter || counter >= 300.0) &&
 				g_settings->getBool("server_announce")) {
 			ServerList::sendAnnounce(counter ? ServerList::AA_UPDATE :
 						ServerList::AA_START,
@@ -1886,8 +2051,9 @@ void Server::SendHUDAdd(session_t peer_id, u32 id, HudElement *form)
 		pkt << v2s32::from(form->size);
 
 	/// Bit 0: hideable
-	/// Bits 1 ... 8: unused (set to 0)
-	u8 flags = form->hideable ? 1 : 0;
+	/// Bit 1: touchable
+	/// Bits 2 ... 8: unused (set to 0)
+	u8 flags = (form->hideable ? 1 : 0) | (form->touchable ? 2 : 0);
 
 	pkt << form->z_index << form->text2 << form->style << flags;
 
@@ -2069,6 +2235,18 @@ void Server::SendCamera(session_t peer_id, Player *player)
 	NetworkPacket pkt(TOCLIENT_CAMERA, 1, peer_id);
 
 	pkt << static_cast<u8>(player->allowed_camera_mode);
+
+	// Optional trailing RTS camera block (older clients simply ignore it)
+	const RtsCameraParams &rts = player->rts_camera;
+	pkt << static_cast<u8>(rts.enabled ? 1 : 0);
+	if (rts.enabled) {
+		pkt << rts.min_x << rts.min_z << rts.max_x << rts.max_z
+				<< rts.pitch << rts.yaw << rts.dist_min << rts.dist_max;
+		pkt << static_cast<u8>(rts.buttons.size());
+		for (const RtsButton &b : rts.buttons)
+			pkt << b.name << b.image << static_cast<u8>(b.action ? 1 : 0);
+		pkt << rts.active_button;
+	}
 
 	Send(&pkt);
 }
@@ -4163,6 +4341,148 @@ v3f Server::findSpawnPos()
 	return v3f(0.0f, 0.0f, 0.0f);
 }
 
+bool Server::createSubWorld(const std::string &name)
+{
+	if (!dimension::isValidName(name))
+		return false;
+	if (name == dimension::DEFAULT_NAME)
+		return false;
+
+	std::string error;
+	return createDimension(name, {}, error);
+}
+
+void Server::transferPlayer(const std::string &playername,
+		const std::string &subworld_name, v3f pos)
+{
+	PlayerSAO *sao = nullptr;
+	for (session_t peer_id : m_clients.getClientIDs()) {
+		RemoteClient *client = getClient(peer_id);
+		if (client && client->getName() == playername) {
+			sao = getPlayerSAO(peer_id);
+			break;
+		}
+	}
+	if (!sao)
+		return;
+
+	if (subworld_name != "overworld" && !dimension::exists(m_path_world, subworld_name))
+		return;
+
+	auto &state = m_player_subworld_states[playername];
+	state.positions[state.current_subworld] = sao->getBasePosition();
+	state.current_subworld = subworld_name;
+	state.positions[subworld_name] = pos;
+	sao->setBasePosition(pos);
+	SendMovePlayer(sao);
+}
+
+std::string Server::getPlayerSubWorld(const std::string &playername)
+{
+	auto it = m_player_subworld_states.find(playername);
+	if (it == m_player_subworld_states.end())
+		return "overworld";
+	return it->second.current_subworld;
+}
+
+std::vector<std::string> Server::listSubWorlds()
+{
+	return dimension::list(m_path_world);
+}
+
+std::string Server::getDimensionPath() const
+{
+	return dimension::getMapPath(m_path_world, m_dimension);
+}
+
+std::vector<std::string> Server::listDimensions() const
+{
+	return dimension::list(m_path_world);
+}
+
+bool Server::createDimension(const std::string &name,
+		const std::vector<std::pair<std::string, std::string>> &map_settings,
+		std::string &error)
+{
+	if (!dimension::create(m_path_world, name, map_settings, error))
+		return false;
+	if (m_dimension_created_cb)
+		m_dimension_created_cb(name);
+	return true;
+}
+
+bool Server::requestDimensionSwitch(const std::string &name, std::string &error)
+{
+	if (m_dedicated) {
+		error = "a dedicated server cannot restart itself: run one server per "
+			"dimension and set dimension_servers (see doc/dimensions.md)";
+		return false;
+	}
+	if (!m_bound_dimension.empty()) {
+		error = "the world \"" + name + "\" has no server (yet): its server is "
+			"still starting, try again in a few seconds";
+		return false;
+	}
+	if (!dimension::exists(m_path_world, name)) {
+		error = "unknown dimension \"" + name + "\"";
+		return false;
+	}
+	if (name == m_dimension) {
+		error = "already in this dimension";
+		return false;
+	}
+	if (m_dimension_switch_requested) {
+		error = "a dimension switch is already in progress";
+		return false;
+	}
+	if (!dimension::saveCurrent(m_path_world, name)) {
+		error = "could not save the dimension state";
+		return false;
+	}
+
+	actionstream << "Switching dimension \"" << m_dimension << "\" -> \""
+		<< name << "\"" << std::endl;
+	// The client notices this, stops the game and starts it again in the new dimension
+	m_dimension_switch_requested = true;
+	return true;
+}
+
+bool Server::transferPlayer(const std::string &name, const std::string &address,
+		u16 port, std::string &error)
+{
+	if (port == 0 || address.size() > 255) {
+		error = "invalid address or port";
+		return false;
+	}
+	RemotePlayer *player = m_env->getPlayer(name.c_str());
+	if (!player || player->getPeerId() == PEER_ID_INEXISTENT) {
+		error = "player is not connected";
+		return false;
+	}
+
+	NetworkPacket pkt(TOCLIENT_TRANSFER, 0, player->getPeerId());
+	pkt << address << port;
+	Send(&pkt);
+	actionstream << "Transferring player " << name << " to port " << port << std::endl;
+	return true;
+}
+
+bool Server::sendChatCommands(const std::string &name,
+		const std::vector<ChatCommandInfo> &commands)
+{
+	RemotePlayer *player = m_env->getPlayer(name.c_str());
+	if (!player || player->getPeerId() == PEER_ID_INEXISTENT)
+		return false;
+
+	NetworkPacket pkt(TOCLIENT_CHAT_COMMANDS, 0, player->getPeerId());
+	const size_t count = std::min<size_t>(commands.size(), 65535);
+	pkt << (u16)count;
+	for (size_t i = 0; i < count; i++)
+		pkt << commands[i].name << commands[i].params << commands[i].description;
+	Send(&pkt);
+	return true;
+}
+
 void Server::requestShutdown(const std::string &msg, bool reconnect, float delay)
 {
 	if (delay == 0.0f) {
@@ -4527,70 +4847,6 @@ bool Server::migrateModStorageDatabase(const GameParams &game_params, const Sett
 	}
 
 	return succeeded;
-}
-
-bool Server::createSubWorld(const std::string &name)
-{
-	if (name.empty() || name == "." || name == ".." || name == "overworld" ||
-		name.find('/') != std::string::npos || name.find('\\') != std::string::npos)
-		return false;
-
-	const std::string path = m_path_world + DIR_DELIM + name;
-	if (isSubWorldDir(path))
-		return true;
-	if (fs::PathExists(path))
-		return false;
-	if (!fs::CreateDir(path))
-		return false;
-
-	const std::string worldmt = path + DIR_DELIM + "world.mt";
-	return fs::safeWriteToFile(worldmt, "gameid = minetest\n");
-}
-
-void Server::transferPlayer(const std::string &playername,
-		const std::string &subworld_name, v3f pos)
-{
-	PlayerSAO *sao = nullptr;
-	for (session_t peer_id : m_clients.getClientIDs()) {
-		RemoteClient *client = getClient(peer_id);
-		if (client && client->getName() == playername) {
-			sao = getPlayerSAO(peer_id);
-			break;
-		}
-	}
-	if (!sao)
-		return;
-
-	if (subworld_name != "overworld" &&
-		!isSubWorldDir(m_path_world + DIR_DELIM + subworld_name))
-		return;
-
-	auto &state = m_player_subworld_states[playername];
-	state.positions[state.current_subworld] = sao->getBasePosition();
-	state.current_subworld = subworld_name;
-	state.positions[subworld_name] = pos;
-	sao->setBasePosition(pos);
-	SendMovePlayer(sao);
-}
-
-std::string Server::getPlayerSubWorld(const std::string &playername)
-{
-	auto it = m_player_subworld_states.find(playername);
-	if (it == m_player_subworld_states.end())
-		return "overworld";
-	return it->second.current_subworld;
-}
-
-std::vector<std::string> Server::listSubWorlds()
-{
-	std::vector<std::string> result{"overworld"};
-	for (const auto &node : fs::GetDirListing(m_path_world)) {
-		if (!node.dir || node.name.empty() || node.name[0] == '.' || node.name == "overworld")
-			continue;
-		if (isSubWorldDir(m_path_world + DIR_DELIM + node.name))
-			result.push_back(node.name);
-	}
-	return result;
 }
 
 u16 Server::getProtocolVersionMin()

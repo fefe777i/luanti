@@ -27,6 +27,7 @@ class InventoryManager;
 class ISimpleTextureSource;
 class Client;
 class GUIScrollContainer;
+class GUIPanZoom;
 class ISoundManager;
 class IShaderSource;
 
@@ -41,6 +42,7 @@ enum FormspecFieldType {
 	f_ItemImage,
 	f_HyperText,
 	f_AnimatedImage,
+	f_PanZoom,
 	f_Unknown
 };
 
@@ -273,6 +275,7 @@ public:
 
 	void acceptInput(FormspecQuitMode quitmode=quit_mode_no);
 	bool preprocessEvent(const SEvent& event) override;
+	bool preprocessTouch(const SEvent &event) override;
 	bool OnEvent(const SEvent& event) override;
 
 	bool doPause = false;
@@ -356,6 +359,7 @@ protected:
 	std::vector<std::pair<FieldSpec, std::vector<std::string>>> m_dropdowns;
 	std::vector<gui::IGUIElement *> m_clickthrough_elements;
 	std::vector<std::pair<std::string, GUIScrollContainer *>> m_scroll_containers;
+	std::vector<std::pair<std::string, GUIPanZoom *>> m_pan_zooms;
 
 	std::unique_ptr<GUIInventoryList::ItemSpec> m_selected_item;
 	u16 m_selected_amount = 0;
@@ -452,6 +456,8 @@ private:
 	void parseContainerEnd(parserData* data, const std::string &element);
 	void parseScrollContainer(parserData *data, const std::string &element);
 	void parseScrollContainerEnd(parserData *data, const std::string &element);
+	void parsePanZoomContainer(parserData *data, const std::string &element);
+	void parsePanZoomContainerEnd(parserData *data, const std::string &element);
 	void parseList(parserData* data, const std::string &element);
 	void parseListRing(parserData* data, const std::string &element);
 	void parseCheckbox(parserData* data, const std::string &element);

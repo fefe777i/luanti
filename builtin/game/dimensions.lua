@@ -23,8 +23,13 @@
 
 local S = core.get_translator("__builtin")
 
+-- core.dimension_arriving[name] is true while a player who travelled from
+-- another world is being put in place (during that join).
+core.dimension_arriving = {}
+
 local META_POS = "dimension_pos:"          -- last position in a dimension
 local META_ARRIVAL = "dimension_arrival"   -- where to appear after the restart
+local META_CURRENT = "dimension_current"   -- dimension the player was last in
 
 local MAPGENS = {
 	v5 = true, v6 = true, v7 = true, valleys = true,
@@ -96,6 +101,67 @@ local function get_dimension_server(dimension)
 	end
 end
 
+-- Moves a player to the server of a dimension. In a hosted game the server of
+-- a world only runs while somebody is in it, so it may have to be started
+-- first: the transfer then waits for it (up to a minute) and `on_fail(text)`
+-- is called if that does not work out. Returns like core.transfer_player()
+-- for what can be decided right away.
+local function transfer_to_dimension_server(name, dimension, on_fail, force_disconnect)
+	local function attempt(waited)
+		if not core.get_player_by_name(name) then
+			return true
+		end
+
+		local state, msg
+		if core.wake_dimension_server then
+			state, msg = core.wake_dimension_server(dimension)
+		end
+
+		if state == "failed" then
+			local text = S("Could not start the world \"@1\": @2", dimension, msg or "")
+			if waited == 0 and not force_disconnect then
+				return false, text
+			end
+			on_fail(text)
+			return false, text
+		elseif state == "starting" then
+			if waited >= 120 then
+				local text = S("The world \"@1\" did not start in time.", dimension)
+				on_fail(text)
+				return false, text
+			end
+			if waited == 0 then
+				core.chat_send_player(name,
+					S("The world \"@1\" is loading, please wait...", dimension))
+			end
+			core.after(0.5, attempt, waited + 1)
+			return true
+		end
+
+		local host, port = get_dimension_server(dimension)
+		if not port then
+			local text = S("The world \"@1\" has no server.", dimension)
+			if waited > 0 or force_disconnect then
+				on_fail(text)
+			end
+			return false, text
+		end
+		local ok, err = core.transfer_player(name, host, port)
+		if ok or force_disconnect then
+			-- Clients that cannot be transferred automatically get the port
+			core.after(5, function()
+				if core.get_player_by_name(name) then
+					core.disconnect_player(name,
+						S("Please reconnect to port @1 to enter the world \"@2\".",
+						port, dimension))
+				end
+			end)
+		end
+		return ok, err
+	end
+	return attempt(0)
+end
+
 function core.travel_to_dimension(player, dimension, pos)
 	player = get_player(player)
 	if not player then
@@ -123,26 +189,32 @@ function core.travel_to_dimension(player, dimension, pos)
 	meta:set_string(META_ARRIVAL, target and core.pos_to_string(target) or "find")
 
 	-- Servers with one server per dimension send the player to the right server.
-	-- Singleplayer and hosted games ("Host game") restart in the other dimension.
-	local host, port
+	-- Singleplayer restarts in the other dimension. A hosted game ("Host game")
+	-- starts the server of the world on demand: the transfer waits for it.
+	local ok, err
+	local name = player:get_player_name()
+	local one_server_per_dimension = false
 	if not core.is_singleplayer() then
-		host, port = get_dimension_server(dimension)
+		local state, msg
+		if core.wake_dimension_server then
+			state, msg = core.wake_dimension_server(dimension)
+		end
+		if state == "failed" then
+			meta:set_string(META_ARRIVAL, "")
+			return false, msg
+		end
+		local _, port = get_dimension_server(dimension)
+		one_server_per_dimension = (state ~= nil) or (port ~= nil)
 	end
 
-	local ok, err
-	if port then
-		local name = player:get_player_name()
-		ok, err = core.transfer_player(name, host, port)
-		if ok then
-			-- Clients that cannot be transferred automatically get the port
-			core.after(5, function()
-				if core.get_player_by_name(name) then
-					core.disconnect_player(name,
-						S("Please reconnect to port @1 to enter the world \"@2\".",
-						port, dimension))
-				end
-			end)
-		end
+	if one_server_per_dimension then
+		ok, err = transfer_to_dimension_server(name, dimension, function(text)
+			local p = core.get_player_by_name(name)
+			if p then
+				p:get_meta():set_string(META_ARRIVAL, "")
+			end
+			core.chat_send_player(name, text)
+		end)
 	else
 		ok, err = core.switch_dimension(dimension)
 	end
@@ -158,13 +230,40 @@ end
 core.register_on_joinplayer(function(player)
 	local meta = player:get_meta()
 	local arrival = meta:get_string(META_ARRIVAL)
+	local here = core.get_current_dimension()
+
+	-- Every dimension is its own server: a player who left the game in
+	-- another dimension continues there (their saved position belongs to
+	-- that dimension's map).
+	local last = meta:get_string(META_CURRENT)
+	if arrival == "" and last ~= "" and last ~= here and not core.is_singleplayer()
+			and core.settings:get_bool("dimension_rejoin_last", true) then
+		local _, port = get_dimension_server(last)
+		if port then
+			local name = player:get_player_name()
+			core.after(0, function()
+				local function kick(text)
+					if core.get_player_by_name(name) then
+						core.disconnect_player(name, text)
+					end
+				end
+				transfer_to_dimension_server(name, last, kick, true)
+			end)
+			return
+		end
+	end
+	meta:set_string(META_CURRENT, here)
+
 	if arrival == "" then
 		return
 	end
 	meta:set_string(META_ARRIVAL, "")
 
 	local name = player:get_player_name()
+	-- Mods can tell a travel arrival from an ordinary login
+	core.dimension_arriving[name] = true
 	core.after(0, function()
+		core.dimension_arriving[name] = nil
 		local p = core.get_player_by_name(name)
 		if not p then
 			return

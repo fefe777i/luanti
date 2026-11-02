@@ -1,0 +1,15 @@
+{"meta":{"format_version":"4.10","model_format":"free","box_uv":false},
+ "resolution":{"width":16,"height":16},
+ "elements":[
+  {"name":"body","type":"cube","uuid":"e1","from":[-4,12,-2],"to":[4,24,2],"origin":[0,12,0],"rotation":[0,0,0],"faces":{
+    "north":{"uv":[0,0,8,12],"texture":0},"south":{"uv":[0,0,8,12],"texture":0},
+    "east":{"uv":[0,0,4,12],"texture":0},"west":{"uv":[0,0,4,12],"texture":0},
+    "up":{"uv":[0,0,8,4],"texture":0},"down":{"uv":[0,0,8,4],"texture":0}}},
+  {"name":"arm","type":"cube","uuid":"e2","from":[4,12,-2],"to":[8,24,2],"origin":[6,24,0],"box_uv":true,"uv_offset":[0,0],"faces":{"north":{"texture":0},"south":{"texture":0},"east":{"texture":0},"west":{"texture":0},"up":{"texture":0},"down":{"texture":0}}}
+ ],
+ "outliner":["e1",{"name":"arm_r","uuid":"g1","origin":[6,24,0],"rotation":[0,0,0],"children":["e2"]}],
+ "textures":[{"name":"t","source":"data:image/png;base64,iVBORw0KGgo="}],
+ "animations":[{"uuid":"a1","name":"walk","loop":"loop","length":1.0,"animators":{"g1":{"name":"arm_r","type":"bone","keyframes":[
+   {"channel":"rotation","time":0,"data_points":[{"x":30,"y":0,"z":0}],"interpolation":"linear"},
+   {"channel":"rotation","time":1,"data_points":[{"x":-30,"y":0,"z":0}],"interpolation":"linear"},
+   {"channel":"position","time":0.5,"data_points":[{"x":0,"y":1,"z":0}]}]}}}]}

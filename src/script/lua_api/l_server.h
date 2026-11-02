@@ -87,6 +87,9 @@ private:
 	static int l_create_dimension(lua_State *L);
 	// switch_dimension(name) -> true | false, error
 	static int l_switch_dimension(lua_State *L);
+
+	// wake_dimension_server(name)
+	static int l_wake_dimension_server(lua_State *L);
 	// transfer_player(name, address, port) -> true | false, error
 	// or transfer_player(name, subworld_name, pos)
 	static int l_transfer_player(lua_State *L);

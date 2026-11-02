@@ -20,12 +20,16 @@
 #include "client/texturesource.h"
 #include "camera.h"
 #include "filesys.h"
+#include "settings.h"
+#include "util/base64.h"
 #include "game.h"
 #include "gettext.h"
 #include "gettime.h"
 #include "guiscalingfilter.h"
 #include "item_visuals_manager.h"
 #include "itemdef.h"
+#include "nodedef.h"
+#include "wieldmesh.h"
 #include "mapblock.h"
 #include "mapblock_mesh.h"
 #include "mapnode.h"
@@ -399,6 +403,8 @@ Client::~Client()
 	if (m_con)
 		m_con->Disconnect();
 
+	clearGhostNodes();
+
 	deleteAuthData();
 
 	m_mesh_update_manager->stop();
@@ -464,6 +470,16 @@ void Client::step(float dtime)
 	m_animation_time = fmodf(m_animation_time + dtime, 60.0f);
 
 	ReceiveAll();
+
+	// Workshop 47: upload the skin chosen in the main menu shortly after
+	// joining (the server needs a moment to mark us as active).
+	if (m_ws47_skin_timer >= 0.0f) {
+		m_ws47_skin_timer += dtime;
+		if (m_ws47_skin_timer >= 2.0f) {
+			m_ws47_skin_timer = -1.0f;
+			ws47SendSkin();
+		}
+	}
 
 	/*
 		Packet counter
@@ -1355,6 +1371,54 @@ void Client::sendInventoryFields(const std::string &formname,
 	Send(&pkt);
 }
 
+// Workshop 47: send the skin picked in the main menu to the server.
+// The PNG is base64-encoded because the server strips control characters
+// from formspec field values, which would corrupt binary data. It is sent as
+// a field of a formspec submission with an empty formname, which the server
+// passes straight to on_player_receive_fields (also on unmodified servers).
+void Client::ws47SendSkin()
+{
+	std::string path;
+	if (!g_settings->getNoEx("ws47_skin_fullpath", path) || path.empty())
+		return;
+
+	std::string data;
+	if (!fs::ReadFile(path, data) || data.empty()) {
+		warningstream << "Skin upload: cannot read \"" << path << "\"" << std::endl;
+		return;
+	}
+	if (data.size() > 65536) {
+		warningstream << "Skin upload: file too large (" << data.size()
+			<< " bytes, max 65536)" << std::endl;
+		return;
+	}
+
+	StringMap fields;
+	fields["ws47_skin"] = base64_encode(data);
+
+	// Arm sleeve and glove pictures made when the skin was added; they are in
+	// "parts/<skin name>.arm.png" and ".hand.png" next to the skin file.
+	size_t slash = path.find_last_of("/\\");
+	if (slash != std::string::npos) {
+		std::string dir = path.substr(0, slash + 1);
+		std::string stem = path.substr(slash + 1);
+		if (stem.size() > 4 && lowercase(stem.substr(stem.size() - 4)) == ".png")
+			stem.resize(stem.size() - 4);
+		const char *kinds[2][2] = {{"arm", "ws47_arm"}, {"hand", "ws47_hand"}};
+		for (auto &kind : kinds) {
+			std::string part;
+			std::string part_path = dir + "parts" + DIR_DELIM + stem + "." +
+				kind[0] + ".png";
+			if (fs::ReadFile(part_path, part) && !part.empty() &&
+					part.size() <= 4096)
+				fields[kind[1]] = base64_encode(part);
+		}
+	}
+
+	sendInventoryFields("", fields);
+	infostream << "Skin upload: sent " << data.size() << " bytes" << std::endl;
+}
+
 void Client::sendInventoryAction(InventoryAction *a)
 {
 	std::ostringstream os(std::ios_base::binary);
@@ -1433,6 +1497,59 @@ void Client::sendDamage(u16 damage)
 	NetworkPacket pkt(TOSERVER_DAMAGE, sizeof(u16));
 	pkt << damage;
 	Send(&pkt);
+}
+
+void Client::sendHudTouch(const std::string &hud_element_name)
+{
+	NetworkPacket pkt(TOSERVER_HUD_TOUCH, 0);
+	pkt << hud_element_name;
+	Send(&pkt);
+}
+
+void Client::setGhostNode(v3s16 pos, const std::string &node_name)
+{
+	content_t id;
+	if (!ndef()->getId(node_name, id))
+		return; // unknown node name, ignore silently
+
+	// Replace any existing ghost node at this position first
+	removeGhostNode(pos);
+
+	auto *scenenode = new WieldMeshSceneNode(getSceneManager(), -1);
+
+	ItemStack item(node_name, 1, 0, idef());
+	scenenode->setItem(item, this, false);
+
+	// setItem() always shrinks node meshes down to hand-held "wield" size
+	// internally; override that back to full real-world node size here.
+	scenenode->setStaticNodeScale(1.0f);
+
+	// Semi-transparent white tint so the underlying node texture still
+	// shows through, giving the classic "ghost block" preview look.
+	scenenode->setColor(video::SColor(140, 255, 255, 255));
+
+	scenenode->setPosition(intToFloat(pos, BS));
+
+	scenenode->drop(); // the scene manager already grabbed a reference
+
+	m_ghost_nodes[pos] = scenenode;
+}
+
+void Client::removeGhostNode(v3s16 pos)
+{
+	auto it = m_ghost_nodes.find(pos);
+	if (it == m_ghost_nodes.end())
+		return;
+
+	it->second->remove();
+	m_ghost_nodes.erase(it);
+}
+
+void Client::clearGhostNodes()
+{
+	for (auto &it : m_ghost_nodes)
+		it.second->remove();
+	m_ghost_nodes.clear();
 }
 
 void Client::sendRespawnLegacy()
@@ -1959,6 +2076,7 @@ void Client::afterContentReceived()
 
 	m_state = LC_Ready;
 	sendReady();
+	m_ws47_skin_timer = 0.0f;
 
 	if (m_mods_loaded)
 		m_script->on_client_ready(m_env.getLocalPlayer());
@@ -2042,32 +2160,6 @@ ParticleManager* Client::getParticleManager()
 	return m_particle_manager.get();
 }
 
-scene::IAnimatedMesh* Client::getMesh(const std::string &filename, bool cache)
-{
-	StringMap::const_iterator it = m_mesh_data.find(filename);
-	if (it == m_mesh_data.end()) {
-		errorstream << "Client::getMesh(): Mesh not found: \"" << filename
-			<< "\"" << std::endl;
-		return NULL;
-	}
-	const std::string &data    = it->second;
-
-	// Create the mesh, remove it from cache and return it
-	// This allows unique vertex colors and other properties for each instance
-	io::IReadFile *rfile = m_rendering_engine->get_filesystem()->createMemoryReadFile(
-			data.c_str(), data.size(), filename.c_str());
-	FATAL_ERROR_IF(!rfile, "Could not create/open RAM file");
-
-	scene::IAnimatedMesh *mesh = m_rendering_engine->get_scene_manager()->getMesh(rfile);
-	rfile->drop();
-	if (!mesh)
-		return nullptr;
-	mesh->grab();
-	if (!cache)
-		m_rendering_engine->removeMesh(mesh);
-	return mesh;
-}
-
 std::string Client::getEmbeddedTexture(const std::string &mesh_name,
 		const scene::IAnimatedMesh *mesh, u32 slot)
 {
@@ -2097,6 +2189,32 @@ std::string Client::getEmbeddedTexture(const std::string &mesh_name,
 	img->drop();
 	m_embedded_textures.insert(name);
 	return name;
+}
+
+scene::IAnimatedMesh* Client::getMesh(const std::string &filename, bool cache)
+{
+	StringMap::const_iterator it = m_mesh_data.find(filename);
+	if (it == m_mesh_data.end()) {
+		errorstream << "Client::getMesh(): Mesh not found: \"" << filename
+			<< "\"" << std::endl;
+		return NULL;
+	}
+	const std::string &data    = it->second;
+
+	// Create the mesh, remove it from cache and return it
+	// This allows unique vertex colors and other properties for each instance
+	io::IReadFile *rfile = m_rendering_engine->get_filesystem()->createMemoryReadFile(
+			data.c_str(), data.size(), filename.c_str());
+	FATAL_ERROR_IF(!rfile, "Could not create/open RAM file");
+
+	scene::IAnimatedMesh *mesh = m_rendering_engine->get_scene_manager()->getMesh(rfile);
+	rfile->drop();
+	if (!mesh)
+		return nullptr;
+	mesh->grab();
+	if (!cache)
+		m_rendering_engine->removeMesh(mesh);
+	return mesh;
 }
 
 /*

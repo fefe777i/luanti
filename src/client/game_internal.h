@@ -4,6 +4,8 @@
 
 #pragma once
 
+#include <functional>
+
 #include "game.h"
 
 #include <AnimatedMeshSceneNode.h>
@@ -128,6 +130,7 @@ protected:
 	bool init(const std::string &map_dir, const std::string &address,
 			u16 port, const SubgameSpec &gamespec);
 	bool initSound();
+	bool startExternalServers();
 	bool createServer(const std::string &map_dir,
 			const SubgameSpec &gamespec, u16 port);
 	void copyServerClientCache();
@@ -310,6 +313,12 @@ private:
 
 	Client *client = nullptr;
 	Server *server = nullptr;
+	// Servers run by the launcher (one per dimension of a hosted world)
+	bool m_servers_hosted_by_launcher = false;
+	std::function<bool(std::string &)> m_external_servers_start;
+	std::function<void(std::string &)> m_external_servers_stop;
+	std::function<void()> m_external_servers_step;
+	std::function<bool()> m_external_servers_shutdown_requested;
 
 	ClientDynamicInfo client_display_info{};
 	float dynamic_info_send_timer = 0;

@@ -18,6 +18,7 @@
 #include "fontengine.h"
 #include "clientlauncher.h"
 #include "dimension.h"
+#include "dimensionhost.h"
 #include "version.h"
 #include "renderingengine.h"
 #include "settings.h"
@@ -267,6 +268,10 @@ bool ClientLauncher::run(const GameParams &game_params, const Settings &cmd_args
 		}
 #endif
 
+		// The host left the world (not just moved to another dimension)
+		if (m_dim_host && !m_dimension_restart)
+			m_dim_host.reset();
+
 		m_rendering_engine->get_scene_manager()->clear();
 
 		delete g_touchcontrols;
@@ -289,6 +294,8 @@ bool ClientLauncher::run(const GameParams &game_params, const Settings &cmd_args
 			break;
 		}
 	} // Menu-game loop
+
+	m_dim_host.reset();
 
 	// If profiler was enabled print it one last time
 	if (g_settings->getFloat("profiler_print_interval") > 0) {
@@ -538,6 +545,49 @@ bool ClientLauncher::launch_game(GameErrorData &errordata, GameStartData &start_
 			errordata.setError(msg);
 			return false;
 		}
+	}
+
+	// Servers run by the launcher only exist while hosting a world
+	start_data.servers_hosted_by_launcher = false;
+	start_data.external_servers_start = nullptr;
+	start_data.external_servers_stop = nullptr;
+	start_data.external_servers_step = nullptr;
+	start_data.external_servers_shutdown_requested = nullptr;
+
+	if (start_data.mode == GameClientData::GM_HOST_AND_JOIN) {
+		// "Host game": one server per dimension, so that different players
+		// can be in different dimensions at the same time. The host's own
+		// client joins the main dimension like every other player.
+		start_data.servers_hosted_by_launcher = true;
+		if (start_data.address.empty())
+			start_data.address = "127.0.0.1";
+
+		if (!m_dim_host) {
+			start_data.external_servers_start = [this, &start_data](std::string &error) {
+				auto host = std::make_unique<DimensionHost>(
+						start_data.world_spec.path, start_data.game_spec,
+						start_data.socket_port);
+				if (!host->start(error))
+					return false;
+				m_dim_host = std::move(host);
+				return true;
+			};
+		}
+		start_data.external_servers_stop = [this](std::string &message) {
+			if (!m_dim_host)
+				return;
+			const std::string shutdown_message = m_dim_host->getShutdownMessage();
+			m_dim_host.reset();
+			if (message.empty())
+				message = shutdown_message;
+		};
+		start_data.external_servers_step = [this]() {
+			if (m_dim_host)
+				m_dim_host->step();
+		};
+		start_data.external_servers_shutdown_requested = [this]() {
+			return m_dim_host && m_dim_host->isShutdownRequested();
+		};
 	}
 
 	return true;

@@ -7,6 +7,7 @@
 #include "irrlichttypes.h"
 #include "content/subgames.h"
 #include "log.h" // errorstream
+#include <functional>
 
 // Information provided from "main"
 // Start information for server or client
@@ -54,6 +55,18 @@ struct GameStartData : GameParams, GameClientData
 
 	// "world_path" must be kept in sync!
 	WorldSpec world_spec;
+
+	// Set when the servers are run by the launcher (one per dimension of a
+	// hosted world, see client/dimensionhost.h) instead of by the game.
+	// The game then only connects to them as a client.
+	bool servers_hosted_by_launcher = false;
+	// Starts the servers (blocking; the game shows "Creating server...")
+	std::function<bool(std::string &error)> external_servers_start;
+	// Stops them when the game is left for good (not when moving to another
+	// server of the same host); may append to the message shown in the menu
+	std::function<void(std::string &message)> external_servers_stop;
+	std::function<void()> external_servers_step;
+	std::function<bool()> external_servers_shutdown_requested;
 };
 
 /// Data provided to Lua for error reporting by the main menu

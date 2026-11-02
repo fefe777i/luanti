@@ -435,6 +435,12 @@ bool Game::startup(volatile std::sig_atomic_t *kill,
 	this->input               = input;
 	this->chat_backend        = chat_backend;
 	simple_singleplayer_mode  = start_data.isSinglePlayer();
+	m_servers_hosted_by_launcher = start_data.servers_hosted_by_launcher;
+	m_external_servers_start = start_data.external_servers_start;
+	m_external_servers_stop = start_data.external_servers_stop;
+	m_external_servers_step = start_data.external_servers_step;
+	m_external_servers_shutdown_requested =
+			start_data.external_servers_shutdown_requested;
 
 	input->reloadKeybindings();
 
@@ -513,6 +519,8 @@ void Game::run()
 			&& !(*kill || g_gamecallback->shutdown_requested
 			|| (server && (server->isShutdownRequested()
 				|| server->isDimensionSwitchRequested()))
+			|| (m_external_servers_shutdown_requested
+				&& m_external_servers_shutdown_requested())
 			|| (client && client->hasTransferRequest()))) {
 
 		framemarker.end();
@@ -672,6 +680,10 @@ void Game::shutdown()
 	auto stop_thread = runInThread([=] {
 		delete server;
 		server = nullptr;
+		// Servers of a hosted world keep running while the host's client only
+		// moves to another dimension
+		if (m_external_servers_stop && !errordata->transfer_requested)
+			m_external_servers_stop(errordata->message);
 	}, "ServerStop");
 
 	FpsControl fps_control;
@@ -727,6 +739,9 @@ bool Game::init(
 	if (address.empty()) {
 		if (!createServer(map_dir, gamespec, port))
 			return false;
+	} else if (m_external_servers_start) {
+		if (!startExternalServers())
+			return false;
 	}
 
 	return true;
@@ -755,6 +770,43 @@ bool Game::initSound()
 	soundmaker->registerReceiver(eventmgr);
 
 	return true;
+}
+
+bool Game::startExternalServers()
+{
+	showOverlayMessage(N_("Creating server..."), 0, 5);
+
+	std::string error;
+	bool started = false;
+	auto start_thread = runInThread([&] {
+		started = m_external_servers_start(error);
+	}, "ServerStart");
+
+	input->clear();
+	bool success = true;
+
+	FpsControl fps_control;
+	fps_control.reset();
+
+	while (start_thread->isRunning()) {
+		if (!m_rendering_engine->run() || input->cancelPressed())
+			success = false;
+		f32 dtime;
+		fps_control.limit(device, &dtime);
+
+		if (success)
+			showOverlayMessage(N_("Creating server..."), dtime, 5);
+		else
+			showOverlayMessage(N_("Shutting down..."), dtime, 0, &m_shutdown_progress);
+	}
+
+	start_thread->rethrow();
+
+	if (!started) {
+		errordata->setError(error);
+		return false;
+	}
+	return success;
 }
 
 bool Game::createServer(const std::string &map_dir,
@@ -1042,7 +1094,7 @@ bool Game::connectToServer(const GameStartData &start_data,
 
 	client->migrateModStorage();
 	client->m_simple_singleplayer_mode = simple_singleplayer_mode;
-	client->m_internal_server = !!server;
+	client->m_internal_server = !!server || m_servers_hosted_by_launcher;
 
 	/*
 		Wait for server to accept connection
@@ -2336,6 +2388,9 @@ inline void Game::step(f32 dtime)
 
 		server->step();
 	}
+
+	if (m_external_servers_step)
+		m_external_servers_step();
 
 	if (!m_is_paused)
 		client->step(dtime);
