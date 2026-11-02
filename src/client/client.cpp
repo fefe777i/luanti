@@ -3,6 +3,7 @@
 // Copyright (C) 2013 celeron55, Perttu Ahola <celeron55@gmail.com>
 
 #include "client.h"
+#include "SkinnedMesh.h"
 
 #include "chatmessage.h"
 #include "client/clientevent.h"
@@ -19,16 +20,12 @@
 #include "client/texturesource.h"
 #include "camera.h"
 #include "filesys.h"
-#include "settings.h"
-#include "util/base64.h"
 #include "game.h"
 #include "gettext.h"
 #include "gettime.h"
 #include "guiscalingfilter.h"
 #include "item_visuals_manager.h"
 #include "itemdef.h"
-#include "nodedef.h"
-#include "wieldmesh.h"
 #include "mapblock.h"
 #include "mapblock_mesh.h"
 #include "mapnode.h"
@@ -44,9 +41,7 @@
 #include "util/serialize.h"
 #include "util/srp.h"
 #include "util/string.h"
-#include "util/voice_session.h"
 #include "version.h"
-#include "client/voicechat.h"
 
 // CPCSM
 #include "content/mod_configuration.h"
@@ -400,12 +395,9 @@ bool Client::isShutdown()
 
 Client::~Client()
 {
-	m_voice.reset(); // stops the voice thread
 	m_shutdown = true;
 	if (m_con)
 		m_con->Disconnect();
-
-	clearGhostNodes();
 
 	deleteAuthData();
 
@@ -472,18 +464,6 @@ void Client::step(float dtime)
 	m_animation_time = fmodf(m_animation_time + dtime, 60.0f);
 
 	ReceiveAll();
-
-	voiceStep(dtime);
-
-	// Workshop 47: upload the skin chosen in the main menu shortly after
-	// joining (the server needs a moment to mark us as active).
-	if (m_ws47_skin_timer >= 0.0f) {
-		m_ws47_skin_timer += dtime;
-		if (m_ws47_skin_timer >= 2.0f) {
-			m_ws47_skin_timer = -1.0f;
-			ws47SendSkin();
-		}
-	}
 
 	/*
 		Packet counter
@@ -919,7 +899,7 @@ bool Client::loadMedia(const std::string &data, const std::string &filename,
 	}
 
 	const char *model_ext[] = {
-		".x", ".b3d", ".obj", ".gltf", ".glb",
+		".x", ".b3d", ".obj", ".gltf", ".glb", ".bbmodel",
 		NULL
 	};
 	name = removeStringEnd(filename, model_ext);
@@ -1375,54 +1355,6 @@ void Client::sendInventoryFields(const std::string &formname,
 	Send(&pkt);
 }
 
-// Workshop 47: send the skin picked in the main menu to the server.
-// The PNG is base64-encoded because the server strips control characters
-// from formspec field values, which would corrupt binary data. It is sent as
-// a field of a formspec submission with an empty formname, which the server
-// passes straight to on_player_receive_fields (also on unmodified servers).
-void Client::ws47SendSkin()
-{
-	std::string path;
-	if (!g_settings->getNoEx("ws47_skin_fullpath", path) || path.empty())
-		return;
-
-	std::string data;
-	if (!fs::ReadFile(path, data) || data.empty()) {
-		warningstream << "Skin upload: cannot read \"" << path << "\"" << std::endl;
-		return;
-	}
-	if (data.size() > 65536) {
-		warningstream << "Skin upload: file too large (" << data.size()
-			<< " bytes, max 65536)" << std::endl;
-		return;
-	}
-
-	StringMap fields;
-	fields["ws47_skin"] = base64_encode(data);
-
-	// Arm sleeve and glove pictures made when the skin was added; they are in
-	// "parts/<skin name>.arm.png" and ".hand.png" next to the skin file.
-	size_t slash = path.find_last_of("/\\");
-	if (slash != std::string::npos) {
-		std::string dir = path.substr(0, slash + 1);
-		std::string stem = path.substr(slash + 1);
-		if (stem.size() > 4 && lowercase(stem.substr(stem.size() - 4)) == ".png")
-			stem.resize(stem.size() - 4);
-		const char *kinds[2][2] = {{"arm", "ws47_arm"}, {"hand", "ws47_hand"}};
-		for (auto &kind : kinds) {
-			std::string part;
-			std::string part_path = dir + "parts" + DIR_DELIM + stem + "." +
-				kind[0] + ".png";
-			if (fs::ReadFile(part_path, part) && !part.empty() &&
-					part.size() <= 4096)
-				fields[kind[1]] = base64_encode(part);
-		}
-	}
-
-	sendInventoryFields("", fields);
-	infostream << "Skin upload: sent " << data.size() << " bytes" << std::endl;
-}
-
 void Client::sendInventoryAction(InventoryAction *a)
 {
 	std::ostringstream os(std::ios_base::binary);
@@ -1503,59 +1435,6 @@ void Client::sendDamage(u16 damage)
 	Send(&pkt);
 }
 
-void Client::sendHudTouch(const std::string &hud_element_name)
-{
-	NetworkPacket pkt(TOSERVER_HUD_TOUCH, 0);
-	pkt << hud_element_name;
-	Send(&pkt);
-}
-
-void Client::setGhostNode(v3s16 pos, const std::string &node_name)
-{
-	content_t id;
-	if (!ndef()->getId(node_name, id))
-		return; // unknown node name, ignore silently
-
-	// Replace any existing ghost node at this position first
-	removeGhostNode(pos);
-
-	auto *scenenode = new WieldMeshSceneNode(getSceneManager(), -1);
-
-	ItemStack item(node_name, 1, 0, idef());
-	scenenode->setItem(item, this, false);
-
-	// setItem() always shrinks node meshes down to hand-held "wield" size
-	// internally; override that back to full real-world node size here.
-	scenenode->setStaticNodeScale(1.0f);
-
-	// Semi-transparent white tint so the underlying node texture still
-	// shows through, giving the classic "ghost block" preview look.
-	scenenode->setColor(video::SColor(140, 255, 255, 255));
-
-	scenenode->setPosition(intToFloat(pos, BS));
-
-	scenenode->drop(); // the scene manager already grabbed a reference
-
-	m_ghost_nodes[pos] = scenenode;
-}
-
-void Client::removeGhostNode(v3s16 pos)
-{
-	auto it = m_ghost_nodes.find(pos);
-	if (it == m_ghost_nodes.end())
-		return;
-
-	it->second->remove();
-	m_ghost_nodes.erase(it);
-}
-
-void Client::clearGhostNodes()
-{
-	for (auto &it : m_ghost_nodes)
-		it.second->remove();
-	m_ghost_nodes.clear();
-}
-
 void Client::sendRespawnLegacy()
 {
 	NetworkPacket pkt(TOSERVER_RESPAWN_LEGACY, 0);
@@ -1573,90 +1452,6 @@ void Client::sendReady()
 	pkt.putRawString(g_version_hash, (u16) strlen(g_version_hash));
 	pkt << (u16)FORMSPEC_API_VERSION;
 	Send(&pkt);
-
-	voiceStart();
-}
-
-void Client::voiceStart(bool force)
-{
-	if (m_voice)
-		return;
-	if (!force && g_settings->get("voice_chat_mode") == "off")
-		return;
-	m_voice = std::make_unique<VoiceChat>();
-}
-
-void Client::voiceStep(float dtime)
-{
-	if (!m_voice)
-		return;
-	m_voice->step(dtime);
-
-	if (m_voice->isHelloPending()) {
-		std::string pub = m_voice->createHello();
-		m_voice->markHelloSent();
-		if (!pub.empty()) {
-			NetworkPacket pkt(TOSERVER_VOICE_HELLO, 0);
-			pkt << (u8)voicesession::PROTOCOL_VERSION;
-			pkt.putRawString(pub);
-			Send(&pkt);
-		}
-	}
-
-	VoiceChat::OutPacket out;
-	for (int i = 0; i < 10 && m_voice->popOutgoing(out); i++) {
-		NetworkPacket pkt(TOSERVER_VOICE, 0);
-		pkt << out.counter << out.data;
-		Send(&pkt);
-	}
-
-	VoiceChat::SyncMsg sync;
-	for (int i = 0; i < 16 && m_voice->popSync(sync); i++) {
-		NetworkPacket pkt(TOSERVER_VOICE_MUTE, 0);
-		pkt << (u8)sync.kind;
-		if (sync.kind == 1)
-			pkt << sync.name;
-		pkt << (u8)sync.on;
-		Send(&pkt);
-	}
-
-	std::string msg;
-	while (m_voice->popStatus(msg)) {
-		pushToChatQueue(new ChatMessage(CHATMESSAGE_TYPE_SYSTEM,
-				utf8_to_wide(gettext(msg.c_str()))));
-	}
-}
-
-void Client::setVoicePushToTalk(bool down)
-{
-	if (m_voice)
-		m_voice->setPushToTalk(down);
-}
-
-std::wstring Client::getVoiceHudText()
-{
-	if (!m_voice)
-		return L"";
-	std::string text;
-	std::vector<std::string> names = m_voice->getSpeakingNames();
-	if (m_voice->isTransmitting())
-		names.insert(names.begin(), gettext("You"));
-	if (!names.empty()) {
-		text = gettext("Speaking: ");
-		for (size_t i = 0; i < names.size(); i++)
-			text += (i ? ", " : "") + names[i];
-	}
-	std::string mode = g_settings->get("voice_chat_mode");
-	if (m_voice->isDeafened())
-		text += std::string(text.empty() ? "" : "\n") + gettext("Voice chat sound is off");
-	else if (m_voice->isMicMuted() && (mode == "ptt" || mode == "vad"))
-		text += std::string(text.empty() ? "" : "\n") + gettext("Microphone is off");
-	return utf8_to_wide(text);
-}
-
-bool Client::isVoiceTransmitting() const
-{
-	return m_voice && m_voice->isTransmitting();
 }
 
 void Client::sendPlayerPos()
@@ -2164,7 +1959,6 @@ void Client::afterContentReceived()
 
 	m_state = LC_Ready;
 	sendReady();
-	m_ws47_skin_timer = 0.0f;
 
 	if (m_mods_loaded)
 		m_script->on_client_ready(m_env.getLocalPlayer());
@@ -2272,6 +2066,37 @@ scene::IAnimatedMesh* Client::getMesh(const std::string &filename, bool cache)
 	if (!cache)
 		m_rendering_engine->removeMesh(mesh);
 	return mesh;
+}
+
+std::string Client::getEmbeddedTexture(const std::string &mesh_name,
+		const scene::IAnimatedMesh *mesh, u32 slot)
+{
+	const auto *skinned = dynamic_cast<const scene::SkinnedMesh *>(mesh);
+	if (!skinned)
+		return "";
+	const std::string *data = skinned->getEmbeddedTexture(slot);
+	if (!data)
+		return "";
+
+	const std::string name = "_embedded_" + mesh_name + "_" + itos(slot) + ".png";
+	if (m_embedded_textures.count(name))
+		return name;
+
+	io::IReadFile *rfile = m_rendering_engine->get_filesystem()->createMemoryReadFile(
+			data->c_str(), data->size(), name.c_str());
+	if (!rfile)
+		return "";
+	video::IImage *img = m_rendering_engine->get_video_driver()->createImageFromFile(rfile);
+	rfile->drop();
+	if (!img) {
+		warningstream << "Client: Cannot decode texture " << slot
+				<< " embedded in \"" << mesh_name << "\"" << std::endl;
+		return "";
+	}
+	m_tsrc->insertSourceImage(name, img);
+	img->drop();
+	m_embedded_textures.insert(name);
+	return name;
 }
 
 /*

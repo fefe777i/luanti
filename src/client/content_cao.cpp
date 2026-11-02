@@ -1314,9 +1314,14 @@ void GenericCAO::updateTextures(std::string mod)
 		if (m_prop.visual == OBJECTVISUAL_MESH) {
 			for (u32 i = 0; i < m_animated_meshnode->getMaterialCount(); ++i) {
 				const auto texture_idx = m_animated_meshnode->getMesh()->getTextureSlot(i);
-				if (texture_idx >= m_prop.textures.size())
-					continue;
-				std::string texturestring = m_prop.textures[texture_idx];
+				std::string texturestring;
+				if (texture_idx < m_prop.textures.size())
+					texturestring = m_prop.textures[texture_idx];
+				if (texturestring.empty()) {
+					// Fall back to a texture embedded in the model file (.bbmodel)
+					texturestring = m_client->getEmbeddedTexture(m_prop.mesh,
+							m_animated_meshnode->getMesh(), texture_idx);
+				}
 				if (texturestring.empty())
 					continue; // Empty texture string means don't modify that material
 				texturestring += mod;

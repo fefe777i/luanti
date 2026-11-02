@@ -502,8 +502,9 @@ void NodeVisuals::updateMesh(Client *client, const TextureSettings &tsettings)
 		if (auto *skinned_mesh = dynamic_cast<scene::SkinnedMesh *>(src_mesh)) {
 			// Compatibility: Animated meshes, as well as static gltf meshes, are not scaled by BS.
 			// See https://github.com/luanti-org/luanti/pull/16112#issuecomment-2881860329
-			bool is_gltf = skinned_mesh->getSourceFormat() ==
-					scene::SkinnedMesh::SourceFormat::GLTF;
+			const auto src_format = skinned_mesh->getSourceFormat();
+			bool is_gltf = src_format == scene::SkinnedMesh::SourceFormat::GLTF ||
+					src_format == scene::SkinnedMesh::SourceFormat::BBMODEL;
 			apply_bs = skinned_mesh->isStatic() && !is_gltf;
 			// Nodes do not support mesh animation, so we clone the static pose.
 			// This simplifies working with the mesh: We can just scale the vertices

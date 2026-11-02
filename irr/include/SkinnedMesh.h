@@ -36,6 +36,7 @@ public:
 		B3D,
 		X,
 		GLTF,
+		BBMODEL,
 		OTHER,
 	};
 
@@ -57,6 +58,15 @@ public:
 	std::optional<u16> getTrackNumber(const std::string &track_name) const override;
 
 	f32 getMaxFrameNumber(u16 track_nr) const override;
+
+	//! Raw file contents (e.g. PNG) of an image embedded in the model file
+	//! for the given texture slot, or nullptr if the model has none.
+	const std::string *getEmbeddedTexture(u32 slot) const
+	{
+		if (slot >= EmbeddedTextures.size() || EmbeddedTextures[slot].empty())
+			return nullptr;
+		return &EmbeddedTextures[slot];
+	}
 
 	void prepareForAnimation(u16 max_hw_joints) override;
 
@@ -360,6 +370,9 @@ protected:
 	//! Mapping from meshbuffer number to bindable texture slot
 	std::vector<u32> TextureSlots;
 
+	//! Images embedded in the model file, indexed by texture slot (may be empty strings)
+	std::vector<std::string> EmbeddedTextures;
+
 	//! Joints, topologically sorted (parents come before their children).
 	std::vector<SJoint *> AllJoints;
 
@@ -413,6 +426,14 @@ public:
 	void setTextureSlot(u32 meshbufNr, u32 textureSlot)
 	{
 		mesh->TextureSlots.at(meshbufNr) = textureSlot;
+	}
+
+	//! Attaches raw image file contents (e.g. PNG) to a texture slot
+	void setEmbeddedTexture(u32 slot, std::string data)
+	{
+		if (mesh->EmbeddedTextures.size() <= slot)
+			mesh->EmbeddedTextures.resize(slot + 1);
+		mesh->EmbeddedTextures[slot] = std::move(data);
 	}
 
 	//! Adds a new joint to the mesh, access it as last one

@@ -3,7 +3,6 @@
 // Copyright (C) 2010-2013 celeron55, Perttu Ahola <celeron55@gmail.com>
 
 #include "server.h"
-#include "dimension.h"
 
 #include "activeobject.h"
 #include "chat_interface.h"
@@ -510,29 +509,10 @@ void Server::init()
 	//lock environment
 	EnvAutoLock envlock(this);
 
-	// Every dimension has its own map directory ("overworld" is the world folder)
-	// A server can be bound to one dimension with the "dimension" setting
-	// (every dimension as its own server, see doc/dimensions.md). Otherwise the
-	// world opens in the dimension saved in current_dimension.txt.
-	std::string configured_dimension;
-	if (g_settings->getNoEx("dimension", configured_dimension) &&
-			!configured_dimension.empty()) {
-		if (!dimension::exists(m_path_world, configured_dimension)) {
-			throw ServerError("Dimension \"" + configured_dimension +
-				"\" does not exist. Create it first (/newdimension on the main "
-				"server) and then start this server.");
-		}
-		m_dimension = configured_dimension;
-	} else {
-		m_dimension = dimension::loadCurrent(m_path_world);
-	}
-	const std::string map_path = dimension::getMapPath(m_path_world, m_dimension);
-	infostream << "- dimension: " << m_dimension << " [" << map_path << "]" << std::endl;
-
 	// Create the Map (loads map_meta.txt, overriding configured mapgen params)
 	std::unique_ptr<ServerMap> startup_server_map;
 	try {
-		startup_server_map = std::make_unique<ServerMap>(map_path, this,
+		startup_server_map = std::make_unique<ServerMap>(m_path_world, this,
 				m_emerge.get(), m_metrics_backend.get());
 	} catch (DatabaseException &e) {
 		throw ServerError(std::string(
@@ -616,8 +596,6 @@ void Server::init()
 	// intended to be cached after environment loading.
 	m_liquid_transform_every = g_settings->getFloat("liquid_update");
 	m_max_chatmessage_length = g_settings->getU16("chat_message_max_size");
-	m_voice_enabled = g_settings->getBool("voice_chat");
-	m_voice_radius = rangelim(g_settings->getFloat("voice_chat_radius"), 1.0f, 100.0f);
 	m_csm_restriction_flags = g_settings->getU64("csm_restriction_flags");
 	m_csm_restriction_noderange = g_settings->getU32("csm_restriction_noderange");
 }
@@ -1908,9 +1886,8 @@ void Server::SendHUDAdd(session_t peer_id, u32 id, HudElement *form)
 		pkt << v2s32::from(form->size);
 
 	/// Bit 0: hideable
-	/// Bit 1: touchable
-	/// Bits 2 ... 8: unused (set to 0)
-	u8 flags = (form->hideable ? 1 : 0) | (form->touchable ? 2 : 0);
+	/// Bits 1 ... 8: unused (set to 0)
+	u8 flags = form->hideable ? 1 : 0;
 
 	pkt << form->z_index << form->text2 << form->style << flags;
 
@@ -2092,18 +2069,6 @@ void Server::SendCamera(session_t peer_id, Player *player)
 	NetworkPacket pkt(TOCLIENT_CAMERA, 1, peer_id);
 
 	pkt << static_cast<u8>(player->allowed_camera_mode);
-
-	// Optional trailing RTS camera block (older clients simply ignore it)
-	const RtsCameraParams &rts = player->rts_camera;
-	pkt << static_cast<u8>(rts.enabled ? 1 : 0);
-	if (rts.enabled) {
-		pkt << rts.min_x << rts.min_z << rts.max_x << rts.max_z
-				<< rts.pitch << rts.yaw << rts.dist_min << rts.dist_max;
-		pkt << static_cast<u8>(rts.buttons.size());
-		for (const RtsButton &b : rts.buttons)
-			pkt << b.name << b.image << static_cast<u8>(b.action ? 1 : 0);
-		pkt << rts.active_button;
-	}
 
 	Send(&pkt);
 }
@@ -2711,7 +2676,7 @@ bool Server::addMediaFile(const std::string &filename,
 	const char *supported_ext[] = {
 		".png", ".jpg", ".tga",
 		".ogg",
-		".x", ".b3d", ".obj", ".gltf", ".glb",
+		".x", ".b3d", ".obj", ".gltf", ".glb", ".bbmodel",
 		// Translation file formats
 		".tr", ".po", ".mo",
 		// Fonts
@@ -3154,8 +3119,6 @@ void Server::acceptAuth(session_t peer_id, bool forSudoMode)
 
 void Server::DeleteClient(session_t peer_id, ClientDeletionReason reason)
 {
-	m_voice_sessions.erase(peer_id);
-
 	std::wstring message;
 	{
 		/*
@@ -4200,139 +4163,6 @@ v3f Server::findSpawnPos()
 	return v3f(0.0f, 0.0f, 0.0f);
 }
 
-bool Server::createSubWorld(const std::string &name)
-{
-	if (!dimension::isValidName(name))
-		return false;
-	if (name == dimension::DEFAULT_NAME)
-		return false;
-
-	std::string error;
-	return createDimension(name, {}, error);
-}
-
-void Server::transferPlayer(const std::string &playername,
-		const std::string &subworld_name, v3f pos)
-{
-	PlayerSAO *sao = nullptr;
-	for (session_t peer_id : m_clients.getClientIDs()) {
-		RemoteClient *client = getClient(peer_id);
-		if (client && client->getName() == playername) {
-			sao = getPlayerSAO(peer_id);
-			break;
-		}
-	}
-	if (!sao)
-		return;
-
-	if (subworld_name != "overworld" && !dimension::exists(m_path_world, subworld_name))
-		return;
-
-	auto &state = m_player_subworld_states[playername];
-	state.positions[state.current_subworld] = sao->getBasePosition();
-	state.current_subworld = subworld_name;
-	state.positions[subworld_name] = pos;
-	sao->setBasePosition(pos);
-	SendMovePlayer(sao);
-}
-
-std::string Server::getPlayerSubWorld(const std::string &playername)
-{
-	auto it = m_player_subworld_states.find(playername);
-	if (it == m_player_subworld_states.end())
-		return "overworld";
-	return it->second.current_subworld;
-}
-
-std::vector<std::string> Server::listSubWorlds()
-{
-	return dimension::list(m_path_world);
-}
-
-std::string Server::getDimensionPath() const
-{
-	return dimension::getMapPath(m_path_world, m_dimension);
-}
-
-std::vector<std::string> Server::listDimensions() const
-{
-	return dimension::list(m_path_world);
-}
-
-bool Server::createDimension(const std::string &name,
-		const std::vector<std::pair<std::string, std::string>> &map_settings,
-		std::string &error)
-{
-	return dimension::create(m_path_world, name, map_settings, error);
-}
-
-bool Server::requestDimensionSwitch(const std::string &name, std::string &error)
-{
-	if (m_dedicated) {
-		error = "a dedicated server cannot restart itself: run one server per "
-			"dimension and set dimension_servers (see doc/dimensions.md)";
-		return false;
-	}
-	if (!dimension::exists(m_path_world, name)) {
-		error = "unknown dimension \"" + name + "\"";
-		return false;
-	}
-	if (name == m_dimension) {
-		error = "already in this dimension";
-		return false;
-	}
-	if (m_dimension_switch_requested) {
-		error = "a dimension switch is already in progress";
-		return false;
-	}
-	if (!dimension::saveCurrent(m_path_world, name)) {
-		error = "could not save the dimension state";
-		return false;
-	}
-
-	actionstream << "Switching dimension \"" << m_dimension << "\" -> \""
-		<< name << "\"" << std::endl;
-	// The client notices this, stops the game and starts it again in the new dimension
-	m_dimension_switch_requested = true;
-	return true;
-}
-
-bool Server::transferPlayer(const std::string &name, const std::string &address,
-		u16 port, std::string &error)
-{
-	if (port == 0 || address.size() > 255) {
-		error = "invalid address or port";
-		return false;
-	}
-	RemotePlayer *player = m_env->getPlayer(name.c_str());
-	if (!player || player->getPeerId() == PEER_ID_INEXISTENT) {
-		error = "player is not connected";
-		return false;
-	}
-
-	NetworkPacket pkt(TOCLIENT_TRANSFER, 0, player->getPeerId());
-	pkt << address << port;
-	Send(&pkt);
-	actionstream << "Transferring player " << name << " to port " << port << std::endl;
-	return true;
-}
-
-bool Server::sendChatCommands(const std::string &name,
-		const std::vector<ChatCommandInfo> &commands)
-{
-	RemotePlayer *player = m_env->getPlayer(name.c_str());
-	if (!player || player->getPeerId() == PEER_ID_INEXISTENT)
-		return false;
-
-	NetworkPacket pkt(TOCLIENT_CHAT_COMMANDS, 0, player->getPeerId());
-	const size_t count = std::min<size_t>(commands.size(), 65535);
-	pkt << (u16)count;
-	for (size_t i = 0; i < count; i++)
-		pkt << commands[i].name << commands[i].params << commands[i].description;
-	Send(&pkt);
-	return true;
-}
-
 void Server::requestShutdown(const std::string &msg, bool reconnect, float delay)
 {
 	if (delay == 0.0f) {
@@ -4697,6 +4527,70 @@ bool Server::migrateModStorageDatabase(const GameParams &game_params, const Sett
 	}
 
 	return succeeded;
+}
+
+bool Server::createSubWorld(const std::string &name)
+{
+	if (name.empty() || name == "." || name == ".." || name == "overworld" ||
+		name.find('/') != std::string::npos || name.find('\\') != std::string::npos)
+		return false;
+
+	const std::string path = m_path_world + DIR_DELIM + name;
+	if (isSubWorldDir(path))
+		return true;
+	if (fs::PathExists(path))
+		return false;
+	if (!fs::CreateDir(path))
+		return false;
+
+	const std::string worldmt = path + DIR_DELIM + "world.mt";
+	return fs::safeWriteToFile(worldmt, "gameid = minetest\n");
+}
+
+void Server::transferPlayer(const std::string &playername,
+		const std::string &subworld_name, v3f pos)
+{
+	PlayerSAO *sao = nullptr;
+	for (session_t peer_id : m_clients.getClientIDs()) {
+		RemoteClient *client = getClient(peer_id);
+		if (client && client->getName() == playername) {
+			sao = getPlayerSAO(peer_id);
+			break;
+		}
+	}
+	if (!sao)
+		return;
+
+	if (subworld_name != "overworld" &&
+		!isSubWorldDir(m_path_world + DIR_DELIM + subworld_name))
+		return;
+
+	auto &state = m_player_subworld_states[playername];
+	state.positions[state.current_subworld] = sao->getBasePosition();
+	state.current_subworld = subworld_name;
+	state.positions[subworld_name] = pos;
+	sao->setBasePosition(pos);
+	SendMovePlayer(sao);
+}
+
+std::string Server::getPlayerSubWorld(const std::string &playername)
+{
+	auto it = m_player_subworld_states.find(playername);
+	if (it == m_player_subworld_states.end())
+		return "overworld";
+	return it->second.current_subworld;
+}
+
+std::vector<std::string> Server::listSubWorlds()
+{
+	std::vector<std::string> result{"overworld"};
+	for (const auto &node : fs::GetDirListing(m_path_world)) {
+		if (!node.dir || node.name.empty() || node.name[0] == '.' || node.name == "overworld")
+			continue;
+		if (isSubWorldDir(m_path_world + DIR_DELIM + node.name))
+			result.push_back(node.name);
+	}
+	return result;
 }
 
 u16 Server::getProtocolVersionMin()
