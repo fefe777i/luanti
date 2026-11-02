@@ -32,6 +32,7 @@
 class Camera;
 class ClientMediaDownloader;
 class ISoundManager;
+class VoiceChat;
 class IWritableItemDefManager;
 class IWritableShaderSource;
 class IWritableTextureSource;
@@ -217,6 +218,8 @@ public:
 	void handleCommand_SetLighting(NetworkPacket *pkt);
 	void handleCommand_Transfer(NetworkPacket *pkt);
 	void handleCommand_ChatCommands(NetworkPacket *pkt);
+	void handleCommand_VoiceHello(NetworkPacket *pkt);
+	void handleCommand_Voice(NetworkPacket *pkt);
 	void handleCommand_Camera(NetworkPacket* pkt);
 
 	void ProcessData(NetworkPacket *pkt);
@@ -395,11 +398,6 @@ public:
 	bool checkLocalPrivilege(const std::string &priv)
 	{ return checkPrivilege(priv); }
 	virtual scene::IAnimatedMesh* getMesh(const std::string &filename, bool cache = false);
-	/**
-	 * Registers the image embedded in a model file (e.g. .bbmodel) for the given
-	 * texture slot as a texture and returns its name.
-	 * @return texture name, or empty string if the mesh has no embedded texture for that slot
-	 */
 	std::string getEmbeddedTexture(const std::string &mesh_name,
 			const scene::IAnimatedMesh *mesh, u32 slot);
 	ModVFS *getModVFS() { return m_mod_vfs.get(); }
@@ -421,6 +419,16 @@ public:
 	LocalClientState getState() { return m_state; }
 
 	void makeScreenshot();
+
+	// Voice chat (see voicechat.h)
+	void setVoicePushToTalk(bool down);
+	bool isVoiceTransmitting() const;
+	VoiceChat *getVoiceChat() { return m_voice.get(); }
+	// Creates the voice chat if it isn't running yet (also when the mode
+	// is "off", so the menu can switch it on).
+	void voiceStart(bool force = false);
+	// Text for the screen: who is speaking, muted microphone...
+	std::wstring getVoiceHudText();
 
 	inline void pushToChatQueue(ChatMessage *cec)
 	{
@@ -521,6 +529,9 @@ private:
 	// Workshop 47: <0 = nothing to do, otherwise seconds since the client
 	// became ready; when it reaches the delay the chosen skin is uploaded.
 	float m_ws47_skin_timer = -1.0f;
+
+	std::unique_ptr<VoiceChat> m_voice;
+	void voiceStep(float dtime);
 	int m_playerpos_repeat_count = 0;
 	IntervalLimiter m_map_timer_and_unload_interval;
 

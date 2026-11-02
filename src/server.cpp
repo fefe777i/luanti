@@ -4,10 +4,6 @@
 
 #include "server.h"
 #include "dimension.h"
-#include "threading/mutex_auto_lock.h"
-#include <mutex>
-#include <map>
-#include <memory>
 
 #include "activeobject.h"
 #include "chat_interface.h"
@@ -286,142 +282,6 @@ static void enrich_exception(BaseException &e, const NetworkPacket &pkt, bool in
 	Server
 */
 
-namespace {
-// The game settings layer is process-global, but several servers (one per
-// dimension) can run in one process: they share one layer, which is freed
-// together with the last server.
-std::mutex g_game_settings_mutex;
-int g_game_settings_refs = 0;
-
-Settings *acquireGameSettingsLayer()
-{
-	MutexAutoLock lock(g_game_settings_mutex);
-	Settings *layer = Settings::getLayer(SL_GAME);
-	if (!layer)
-		layer = Settings::createLayer(SL_GAME);
-	g_game_settings_refs++;
-	return layer;
-}
-
-void releaseGameSettingsLayer(Settings *layer)
-{
-	if (!layer)
-		return;
-	MutexAutoLock lock(g_game_settings_mutex);
-	if (--g_game_settings_refs <= 0) {
-		g_game_settings_refs = 0;
-		delete layer;
-	}
-}
-
-// All servers of one world in this process (one per dimension) share ONE mod
-// storage connection. Separate SQLite connections lock each other out, because
-// every server keeps a write transaction open between its periodic saves
-// ("database is locked").
-struct SharedModStorage
-{
-	std::unique_ptr<ModStorageDatabase> db;
-	std::mutex mutex;
-	bool saving = false; // a transaction is open
-};
-
-std::mutex g_mod_storage_mutex;
-std::map<std::string, std::weak_ptr<SharedModStorage>> g_mod_storages;
-
-// Per-server handle: every call is serialized on the shared connection.
-class ModStorageProxy final : public ModStorageDatabase
-{
-public:
-	explicit ModStorageProxy(std::shared_ptr<SharedModStorage> shared) :
-		m_s(std::move(shared)) {}
-
-	void beginSave() override
-	{
-		MutexAutoLock lock(m_s->mutex);
-		if (!m_s->saving) {
-			m_s->db->beginSave();
-			m_s->saving = true;
-		}
-	}
-	void endSave() override
-	{
-		MutexAutoLock lock(m_s->mutex);
-		if (m_s->saving) {
-			m_s->saving = false;
-			m_s->db->endSave();
-		}
-	}
-	bool initialized() const override { return m_s->db->initialized(); }
-	void verifyDatabase() override
-	{
-		MutexAutoLock lock(m_s->mutex);
-		m_s->db->verifyDatabase();
-	}
-
-	void getModEntries(const std::string &modname, StringMap *storage) override
-	{
-		MutexAutoLock lock(m_s->mutex);
-		m_s->db->getModEntries(modname, storage);
-	}
-	void getModKeys(const std::string &modname,
-			std::vector<std::string> *storage) override
-	{
-		MutexAutoLock lock(m_s->mutex);
-		m_s->db->getModKeys(modname, storage);
-	}
-	bool hasModEntry(const std::string &modname, const std::string &key) override
-	{
-		MutexAutoLock lock(m_s->mutex);
-		return m_s->db->hasModEntry(modname, key);
-	}
-	bool getModEntry(const std::string &modname, const std::string &key,
-			std::string *value) override
-	{
-		MutexAutoLock lock(m_s->mutex);
-		return m_s->db->getModEntry(modname, key, value);
-	}
-	bool setModEntry(const std::string &modname, const std::string &key,
-			std::string_view value) override
-	{
-		MutexAutoLock lock(m_s->mutex);
-		return m_s->db->setModEntry(modname, key, value);
-	}
-	bool removeModEntry(const std::string &modname, const std::string &key) override
-	{
-		MutexAutoLock lock(m_s->mutex);
-		return m_s->db->removeModEntry(modname, key);
-	}
-	bool removeModEntries(const std::string &modname) override
-	{
-		MutexAutoLock lock(m_s->mutex);
-		return m_s->db->removeModEntries(modname);
-	}
-	void listMods(std::vector<std::string> *res) override
-	{
-		MutexAutoLock lock(m_s->mutex);
-		m_s->db->listMods(res);
-	}
-
-private:
-	std::shared_ptr<SharedModStorage> m_s;
-};
-
-ModStorageDatabase *openSharedModStorage(const std::string &world_path)
-{
-	MutexAutoLock lock(g_mod_storage_mutex);
-	std::shared_ptr<SharedModStorage> shared;
-	auto it = g_mod_storages.find(world_path);
-	if (it != g_mod_storages.end())
-		shared = it->second.lock();
-	if (!shared) {
-		shared = std::make_shared<SharedModStorage>();
-		shared->db.reset(Server::openModStorageDatabase(world_path));
-		g_mod_storages[world_path] = shared;
-	}
-	return new ModStorageProxy(std::move(shared));
-}
-}
-
 Server::Server(
 		const std::string &path_world,
 		const SubgameSpec &gamespec,
@@ -429,8 +289,7 @@ Server::Server(
 		Address bind_addr,
 		bool dedicated,
 		ChatInterface *iface,
-		std::string *shutdown_errmsg,
-		const std::string &bound_dimension
+		std::string *shutdown_errmsg
 	):
 	m_bind_addr(bind_addr),
 	m_path_world(path_world),
@@ -447,8 +306,6 @@ Server::Server(
 	m_shutdown_errmsg(shutdown_errmsg),
 	m_modchannel_mgr(new ModChannelMgr())
 {
-	m_bound_dimension = bound_dimension;
-
 	if (m_path_world.empty())
 		throw ServerError("Supplied empty world path");
 
@@ -595,8 +452,7 @@ Server::~Server()
 	}
 
 	// Delete the rest in the reverse order of creation
-	releaseGameSettingsLayer(m_game_settings);
-	m_game_settings = nullptr;
+	delete m_game_settings;
 	delete m_banmanager;
 	delete m_mod_storage_database;
 	delete m_rollback;
@@ -621,7 +477,7 @@ void Server::init()
 	infostream << "- world:  " << m_path_world << std::endl;
 	infostream << "- game:   " << m_gamespec.path << std::endl;
 
-	m_game_settings = acquireGameSettingsLayer();
+	m_game_settings = Settings::createLayer(SL_GAME);
 
 	// Create world if it doesn't exist
 	try {
@@ -640,7 +496,7 @@ void Server::init()
 	m_banmanager = new BanManager(ban_path);
 
 	// Create mod storage database and begin a save for later
-	m_mod_storage_database = openSharedModStorage(m_path_world);
+	m_mod_storage_database = openModStorageDatabase(m_path_world);
 	m_mod_storage_database->beginSave();
 
 	m_modmgr = std::make_unique<ServerModManager>(m_path_world, m_gamespec);
@@ -658,10 +514,9 @@ void Server::init()
 	// A server can be bound to one dimension with the "dimension" setting
 	// (every dimension as its own server, see doc/dimensions.md). Otherwise the
 	// world opens in the dimension saved in current_dimension.txt.
-	std::string configured_dimension = m_bound_dimension;
-	if (!configured_dimension.empty() ||
-			(g_settings->getNoEx("dimension", configured_dimension) &&
-			!configured_dimension.empty())) {
+	std::string configured_dimension;
+	if (g_settings->getNoEx("dimension", configured_dimension) &&
+			!configured_dimension.empty()) {
 		if (!dimension::exists(m_path_world, configured_dimension)) {
 			throw ServerError("Dimension \"" + configured_dimension +
 				"\" does not exist. Create it first (/newdimension on the main "
@@ -761,6 +616,8 @@ void Server::init()
 	// intended to be cached after environment loading.
 	m_liquid_transform_every = g_settings->getFloat("liquid_update");
 	m_max_chatmessage_length = g_settings->getU16("chat_message_max_size");
+	m_voice_enabled = g_settings->getBool("voice_chat");
+	m_voice_radius = rangelim(g_settings->getFloat("voice_chat_radius"), 1.0f, 100.0f);
 	m_csm_restriction_flags = g_settings->getU64("csm_restriction_flags");
 	m_csm_restriction_noderange = g_settings->getU32("csm_restriction_noderange");
 }
@@ -987,7 +844,7 @@ void Server::AsyncRunStep(float dtime, bool initial_step)
 	// send masterserver announce
 	{
 		float &counter = m_masterserver_timer;
-		if (!isSingleplayer() && m_announce && (!counter || counter >= 300.0) &&
+		if (!isSingleplayer() && (!counter || counter >= 300.0) &&
 				g_settings->getBool("server_announce")) {
 			ServerList::sendAnnounce(counter ? ServerList::AA_UPDATE :
 						ServerList::AA_START,
@@ -3297,6 +3154,8 @@ void Server::acceptAuth(session_t peer_id, bool forSudoMode)
 
 void Server::DeleteClient(session_t peer_id, ClientDeletionReason reason)
 {
+	m_voice_sessions.erase(peer_id);
+
 	std::wstring message;
 	{
 		/*
@@ -4404,11 +4263,7 @@ bool Server::createDimension(const std::string &name,
 		const std::vector<std::pair<std::string, std::string>> &map_settings,
 		std::string &error)
 {
-	if (!dimension::create(m_path_world, name, map_settings, error))
-		return false;
-	if (m_dimension_created_cb)
-		m_dimension_created_cb(name);
-	return true;
+	return dimension::create(m_path_world, name, map_settings, error);
 }
 
 bool Server::requestDimensionSwitch(const std::string &name, std::string &error)
@@ -4416,11 +4271,6 @@ bool Server::requestDimensionSwitch(const std::string &name, std::string &error)
 	if (m_dedicated) {
 		error = "a dedicated server cannot restart itself: run one server per "
 			"dimension and set dimension_servers (see doc/dimensions.md)";
-		return false;
-	}
-	if (!m_bound_dimension.empty()) {
-		error = "the world \"" + name + "\" has no server (yet): its server is "
-			"still starting, try again in a few seconds";
 		return false;
 	}
 	if (!dimension::exists(m_path_world, name)) {
