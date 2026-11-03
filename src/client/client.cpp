@@ -45,9 +45,7 @@
 #include "util/serialize.h"
 #include "util/srp.h"
 #include "util/string.h"
-#include "util/voice_session.h"
 #include "version.h"
-#include "client/voicechat.h"
 
 // CPCSM
 #include "content/mod_configuration.h"
@@ -401,7 +399,6 @@ bool Client::isShutdown()
 
 Client::~Client()
 {
-	m_voice.reset(); // stops the voice thread
 	m_shutdown = true;
 	if (m_con)
 		m_con->Disconnect();
@@ -473,8 +470,6 @@ void Client::step(float dtime)
 	m_animation_time = fmodf(m_animation_time + dtime, 60.0f);
 
 	ReceiveAll();
-
-	voiceStep(dtime);
 
 	// Workshop 47: upload the skin chosen in the main menu shortly after
 	// joining (the server needs a moment to mark us as active).
@@ -1574,90 +1569,6 @@ void Client::sendReady()
 	pkt.putRawString(g_version_hash, (u16) strlen(g_version_hash));
 	pkt << (u16)FORMSPEC_API_VERSION;
 	Send(&pkt);
-
-	voiceStart();
-}
-
-void Client::voiceStart(bool force)
-{
-	if (m_voice)
-		return;
-	if (!force && g_settings->get("voice_chat_mode") == "off")
-		return;
-	m_voice = std::make_unique<VoiceChat>();
-}
-
-void Client::voiceStep(float dtime)
-{
-	if (!m_voice)
-		return;
-	m_voice->step(dtime);
-
-	if (m_voice->isHelloPending()) {
-		std::string pub = m_voice->createHello();
-		m_voice->markHelloSent();
-		if (!pub.empty()) {
-			NetworkPacket pkt(TOSERVER_VOICE_HELLO, 0);
-			pkt << (u8)voicesession::PROTOCOL_VERSION;
-			pkt.putRawString(pub);
-			Send(&pkt);
-		}
-	}
-
-	VoiceChat::OutPacket out;
-	for (int i = 0; i < 10 && m_voice->popOutgoing(out); i++) {
-		NetworkPacket pkt(TOSERVER_VOICE, 0);
-		pkt << out.counter << out.data;
-		Send(&pkt);
-	}
-
-	VoiceChat::SyncMsg sync;
-	for (int i = 0; i < 16 && m_voice->popSync(sync); i++) {
-		NetworkPacket pkt(TOSERVER_VOICE_MUTE, 0);
-		pkt << (u8)sync.kind;
-		if (sync.kind == 1)
-			pkt << sync.name;
-		pkt << (u8)sync.on;
-		Send(&pkt);
-	}
-
-	std::string msg;
-	while (m_voice->popStatus(msg)) {
-		pushToChatQueue(new ChatMessage(CHATMESSAGE_TYPE_SYSTEM,
-				utf8_to_wide(gettext(msg.c_str()))));
-	}
-}
-
-void Client::setVoicePushToTalk(bool down)
-{
-	if (m_voice)
-		m_voice->setPushToTalk(down);
-}
-
-std::wstring Client::getVoiceHudText()
-{
-	if (!m_voice)
-		return L"";
-	std::string text;
-	std::vector<std::string> names = m_voice->getSpeakingNames();
-	if (m_voice->isTransmitting())
-		names.insert(names.begin(), gettext("You"));
-	if (!names.empty()) {
-		text = gettext("Speaking: ");
-		for (size_t i = 0; i < names.size(); i++)
-			text += (i ? ", " : "") + names[i];
-	}
-	std::string mode = g_settings->get("voice_chat_mode");
-	if (m_voice->isDeafened())
-		text += std::string(text.empty() ? "" : "\n") + gettext("Voice chat sound is off");
-	else if (m_voice->isMicMuted() && (mode == "ptt" || mode == "vad"))
-		text += std::string(text.empty() ? "" : "\n") + gettext("Microphone is off");
-	return utf8_to_wide(text);
-}
-
-bool Client::isVoiceTransmitting() const
-{
-	return m_voice && m_voice->isTransmitting();
 }
 
 void Client::sendPlayerPos()
@@ -2249,6 +2160,32 @@ ParticleManager* Client::getParticleManager()
 	return m_particle_manager.get();
 }
 
+scene::IAnimatedMesh* Client::getMesh(const std::string &filename, bool cache)
+{
+	StringMap::const_iterator it = m_mesh_data.find(filename);
+	if (it == m_mesh_data.end()) {
+		errorstream << "Client::getMesh(): Mesh not found: \"" << filename
+			<< "\"" << std::endl;
+		return NULL;
+	}
+	const std::string &data    = it->second;
+
+	// Create the mesh, remove it from cache and return it
+	// This allows unique vertex colors and other properties for each instance
+	io::IReadFile *rfile = m_rendering_engine->get_filesystem()->createMemoryReadFile(
+			data.c_str(), data.size(), filename.c_str());
+	FATAL_ERROR_IF(!rfile, "Could not create/open RAM file");
+
+	scene::IAnimatedMesh *mesh = m_rendering_engine->get_scene_manager()->getMesh(rfile);
+	rfile->drop();
+	if (!mesh)
+		return nullptr;
+	mesh->grab();
+	if (!cache)
+		m_rendering_engine->removeMesh(mesh);
+	return mesh;
+}
+
 std::string Client::getEmbeddedTexture(const std::string &mesh_name,
 		const scene::IAnimatedMesh *mesh, u32 slot)
 {
@@ -2278,32 +2215,6 @@ std::string Client::getEmbeddedTexture(const std::string &mesh_name,
 	img->drop();
 	m_embedded_textures.insert(name);
 	return name;
-}
-
-scene::IAnimatedMesh* Client::getMesh(const std::string &filename, bool cache)
-{
-	StringMap::const_iterator it = m_mesh_data.find(filename);
-	if (it == m_mesh_data.end()) {
-		errorstream << "Client::getMesh(): Mesh not found: \"" << filename
-			<< "\"" << std::endl;
-		return NULL;
-	}
-	const std::string &data    = it->second;
-
-	// Create the mesh, remove it from cache and return it
-	// This allows unique vertex colors and other properties for each instance
-	io::IReadFile *rfile = m_rendering_engine->get_filesystem()->createMemoryReadFile(
-			data.c_str(), data.size(), filename.c_str());
-	FATAL_ERROR_IF(!rfile, "Could not create/open RAM file");
-
-	scene::IAnimatedMesh *mesh = m_rendering_engine->get_scene_manager()->getMesh(rfile);
-	rfile->drop();
-	if (!mesh)
-		return nullptr;
-	mesh->grab();
-	if (!cache)
-		m_rendering_engine->removeMesh(mesh);
-	return mesh;
 }
 
 /*

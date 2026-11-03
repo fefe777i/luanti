@@ -3221,29 +3221,6 @@ Elements
 * End of a scroll_container, following elements are no longer bound to this
   container.
 
-### `pan_zoom_container[<X>,<Y>;<W>,<H>;<name>;<zoom>;<min_zoom>,<max_zoom>]`
-
-* Requires real coordinates. A clipped area whose content can be dragged in
-  any direction with a finger or the mouse and zoomed with two fingers or the
-  mouse wheel. There are no scrollbars.
-* Elements after this one are placed inside the area (positions are relative
-  to its top-left corner), until `pan_zoom_container_end[]`.
-* `zoom` is the zoom the content is currently drawn at, `min_zoom`/`max_zoom`
-  limit the gesture (defaults: 1, 0.2 and 4).
-* While a gesture is going on the engine moves/scales the elements itself.
-  When it ends, the field `name` is sent as `"PZ:<scale>,<ux>,<uy>"`: a point
-  (x, y) of the content (formspec units from the top-left corner of the area)
-  is now at (scale * x + ux, scale * y + uy). The mod stores the new view and
-  redraws the content.
-* A tap (touch without dragging) is sent as the field `name` = `"TAP:<x>,<y>"`
-  (formspec units from the top-left corner of the area), so the mod can
-  decide what was tapped. Do not put buttons that need dragging over the
-  area: a drag that starts on a button does not move the content.
-
-### `pan_zoom_container_end[]`
-
-* End of a pan_zoom_container.
-
 ### `list[<inventory location>;<list name>;<X>,<Y>;<W>,<H>;<starting item index>]`
 
 * Show an inventory list if it has been sent to the client.
@@ -9612,36 +9589,6 @@ You **must not** mix names and track numbers to refer to the same animation.
       - `first`: first-person camera
       - `third`: third-person camera
       - `third_front`: third-person camera, looking opposite of movement direction
-    * `rts`: `false` or a table, enables/disables the top-down RTS camera
-      (this fork only). While enabled the client moves the player itself:
-      a finger (or the mouse) drags the camera over the map, two fingers
-      zoom, the touch joystick and buttons are hidden and the movement
-      anti-cheat is skipped for this player. All fields are optional:
-      - `min = {x=, z=}`, `max = {x=, z=}`: the camera focus is kept inside
-        this rectangle (node coordinates)
-      - `pitch`: angle below the horizon in degrees (15..90, default 60)
-      - `yaw`: look direction in degrees (default 0, same as `set_look_horizontal`)
-      - `dist_min`, `dist_max`: closest and farthest zoom distance in nodes
-        (defaults 10 and 60)
-      - `buttons`: toolbar drawn by the client at the bottom of the screen
-        (finger sized, like the normal touch buttons). A list of
-        `{name = "...", image = "texture.png^modifiers", action = false}`.
-        When one is pressed the client sends the field `rts_button` = `name`
-        with formname `""` (`core.register_on_player_receive_fields`).
-        `action = true` buttons do not stay highlighted. At most 32 buttons.
-      - `active`: the `name` of the button to highlight
-      Send the whole `rts` table again to change the buttons or `active`.
-      The focus starts at the player's position when the mode is enabled.
-      Holding a finger still for the long-tap delay and then dragging draws
-      a selection box on the client. When the finger is lifted the client
-      sends the field `rts_box` with formname `""` (see
-      `core.register_on_player_receive_fields`), the value being
-      `"ex,ey,ez;ax,ay,az;bx,by,bz;cx,cy,cz;dx,dy,dz"`: the camera position
-      in nodes and the unit direction vectors of the rays through the four
-      corners of the box (top-left, top-right, bottom-right, bottom-left).
-      A point is inside the box if it lies inside the pyramid they span.
-      A long press that barely moves still works as an ordinary long tap.
-      Remember to restore the position (`set_pos`) when disabling it.
     * Supported by clients since 5.12.0.
 * `get_camera()`: Returns the camera parameters as a table as above.
 * `send_mapblock(blockpos)`:
