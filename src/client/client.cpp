@@ -3,6 +3,7 @@
 // Copyright (C) 2013 celeron55, Perttu Ahola <celeron55@gmail.com>
 
 #include "client.h"
+#include "SkinnedMesh.h"
 
 #include "chatmessage.h"
 #include "client/clientevent.h"
@@ -919,7 +920,7 @@ bool Client::loadMedia(const std::string &data, const std::string &filename,
 	}
 
 	const char *model_ext[] = {
-		".x", ".b3d", ".obj", ".gltf", ".glb",
+		".x", ".b3d", ".obj", ".gltf", ".glb", ".bbmodel",
 		NULL
 	};
 	name = removeStringEnd(filename, model_ext);
@@ -2272,6 +2273,37 @@ scene::IAnimatedMesh* Client::getMesh(const std::string &filename, bool cache)
 	if (!cache)
 		m_rendering_engine->removeMesh(mesh);
 	return mesh;
+}
+
+std::string Client::getEmbeddedTexture(const std::string &mesh_name,
+		const scene::IAnimatedMesh *mesh, u32 slot)
+{
+	const auto *skinned = dynamic_cast<const scene::SkinnedMesh *>(mesh);
+	if (!skinned)
+		return "";
+	const std::string *data = skinned->getEmbeddedTexture(slot);
+	if (!data)
+		return "";
+
+	const std::string name = "_embedded_" + mesh_name + "_" + itos(slot) + ".png";
+	if (m_embedded_textures.count(name))
+		return name;
+
+	io::IReadFile *rfile = m_rendering_engine->get_filesystem()->createMemoryReadFile(
+			data->c_str(), data->size(), name.c_str());
+	if (!rfile)
+		return "";
+	video::IImage *img = m_rendering_engine->get_video_driver()->createImageFromFile(rfile);
+	rfile->drop();
+	if (!img) {
+		warningstream << "Client: Cannot decode texture " << slot
+				<< " embedded in \"" << mesh_name << "\"" << std::endl;
+		return "";
+	}
+	m_tsrc->insertSourceImage(name, img);
+	img->drop();
+	m_embedded_textures.insert(name);
+	return name;
 }
 
 /*

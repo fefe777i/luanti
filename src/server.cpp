@@ -2711,7 +2711,7 @@ bool Server::addMediaFile(const std::string &filename,
 	const char *supported_ext[] = {
 		".png", ".jpg", ".tga",
 		".ogg",
-		".x", ".b3d", ".obj", ".gltf", ".glb",
+		".x", ".b3d", ".obj", ".gltf", ".glb", ".bbmodel",
 		// Translation file formats
 		".tr", ".po", ".mo",
 		// Fonts

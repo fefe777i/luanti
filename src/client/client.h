@@ -398,6 +398,13 @@ public:
 	bool checkLocalPrivilege(const std::string &priv)
 	{ return checkPrivilege(priv); }
 	virtual scene::IAnimatedMesh* getMesh(const std::string &filename, bool cache = false);
+	/**
+	 * Registers the image embedded in a model file (e.g. .bbmodel) for the given
+	 * texture slot as a texture and returns its name.
+	 * @return texture name, or empty string if the mesh has no embedded texture for that slot
+	 */
+	std::string getEmbeddedTexture(const std::string &mesh_name,
+			const scene::IAnimatedMesh *mesh, u32 slot);
 	ModVFS *getModVFS() { return m_mod_vfs.get(); }
 	ModStorageDatabase *getModStorageDatabase() override { return m_mod_storage_database; }
 
@@ -632,6 +639,8 @@ private:
 
 	// Storage for mesh data for creating multiple instances of the same mesh
 	StringMap m_mesh_data;
+	// Names of textures registered from images embedded in model files
+	std::unordered_set<std::string> m_embedded_textures;
 
 	// own state
 	LocalClientState m_state;

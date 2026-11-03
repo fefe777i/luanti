@@ -256,11 +256,13 @@ set(link_includes
 
 set(IRRMESHLOADER
 	CB3DMeshFileLoader.h
+	CBBMeshFileLoader.h
 	CGLTFMeshFileLoader.h
 	COBJMeshFileLoader.h
 	CXMeshFileLoader.h
 
 	CB3DMeshFileLoader.cpp
+	CBBMeshFileLoader.cpp
 	CGLTFMeshFileLoader.cpp
 	COBJMeshFileLoader.cpp
 	CXMeshFileLoader.cpp
