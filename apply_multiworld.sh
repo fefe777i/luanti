@@ -1,7 +1,7 @@
 #!/bin/bash
 # Applies all engine patches. Safe to run several times.
 #   host_all_worlds.patch - one server per dimension for "Host game"
-#   lazy_dimensions.patch - dimension servers start on demand and stop when empty
+#   lazy_dimensions.patch - dimenson servers start on demand and stop when empty
 #   touch_panzoom.patch   - pan_zoom_container + fixed touch scrolling
 set -e
 cd "$(dirname "$0")"
