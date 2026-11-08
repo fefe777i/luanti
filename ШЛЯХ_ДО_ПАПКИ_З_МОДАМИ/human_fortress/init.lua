@@ -2,7 +2,23 @@
 -- Human Fortress RTS - Init файл
 -------------------------------------------------
 
+-- Overworld (космічна станція мода custom_dimension): без рівнів, ресурсів,
+-- часу й ейдосів - усі гравці 50 рівня. Персональні світи працюють як завжди.
+local function detect_overworld()
+    local f = core.get_current_dimension
+    if not f then return false end
+    local ok, dim = pcall(f)
+    return ok and dim == "overworld"
+end
+HF_IS_OVERWORLD = detect_overworld()
+-- перевіряємо ще раз, коли всі моди завантажені (на випадок, якщо API було не готове)
+core.register_on_mods_loaded(function()
+    HF_IS_OVERWORLD = detect_overworld()
+    human_fortress.is_overworld = HF_IS_OVERWORLD
+end)
+
 human_fortress = {
+    is_overworld = HF_IS_OVERWORLD,
     players = {},
     edos_data = {},
     units = {},
@@ -25,6 +41,7 @@ minetest.log("action", "[HF] BUILDING_MENUS створено")
 -- ============================================
 
 function human_fortress.save_data(name)
+    if HF_IS_OVERWORLD then return end  -- в overworld нічого не зберігаємо
     local data = human_fortress.edos_data[name]
     if data then
         storage:set_string(name .. "_data", minetest.serialize(data))
@@ -65,10 +82,14 @@ end
 -- ЗАВАНТАЖЕННЯ ФАЙЛІВ
 -- ============================================
 
+dofile(path .. "/pathcache.lua")
 dofile(path .. "/resources.lua")
+dofile(path .. "/unit_registry.lua")
 dofile(path .. "/units.lua")
 
 BUILDING_SCHEMATICS = {}
+dofile(path .. "/progression.lua")
+
 local building_files = {
     "townhall.lua",
     "rice_field.lua",
@@ -77,7 +98,14 @@ local building_files = {
     "tower.lua",
     "warehouse.lua",
     "market.lua",
-    "carpenter_workshop.lua"
+    "carpenter_workshop.lua",
+    "auto_collector.lua",
+    "house.lua",
+    "pier.lua",
+    "warehouse_branch.lua",
+    "archer_tower.lua",
+    "bank.lua",
+    "lizard_nest.lua"
 }
 
 for _, file in ipairs(building_files) do
@@ -97,13 +125,20 @@ for _, file in ipairs(building_files) do
     end
 end
 dofile(path .. "/core_heart.lua")
+dofile(path .. "/extras.lua")
 dofile(path .. "/building_health.lua")
 dofile(path .. "/commands.lua")
 dofile(path .. "/ether_tree.lua")
 dofile(path .. "/ai.lua")
 dofile(path .. "/rts.lua")
+dofile(path .. "/minimap_style.lua")
+dofile(path .. "/construction.lua")
+dofile(path .. "/recruit.lua")
 dofile(path .. "/control_stick.lua")
 dofile(path .. "/gui.lua")
+dofile(path .. "/unit_panel.lua")
+dofile(path .. "/selection_list.lua")
+dofile(path .. "/building_info.lua")
 dofile(path .. "/time.lua")
 dofile(minetest.get_modpath("human_fortress") .. "/clock_menu.lua")
 dofile(path .. "/node.lua")
@@ -112,6 +147,7 @@ dofile(path .. "/edos.lua")
 dofile(path .. "/vilka_core.lua")
 dofile(path .. "/vilka_menu.lua")
   dofile(minetest.get_modpath("human_fortress") .. "/golden_fish_ritual.lua")
+dofile(path .. "/features.lua")
 dofile(path .. "/world.lua")
 dofile(path .. "/upgrades.lua")
 dofile(path .. "/words.lua")
@@ -153,6 +189,14 @@ minetest.register_on_joinplayer(function(player)
             upgrades = {}
         }
         minetest.chat_send_player(name, "§G[Human Fortress]§F Створено новий профіль!")
+    end
+
+    if HF_IS_OVERWORLD then
+        -- усі гравці в overworld мають 50 рівень (лише в пам'яті)
+        local d = human_fortress.edos_data[name]
+        d.level = 50
+        d.tax_paid = true
+        d.can_level_up = false
     end
 
     if edit_skin and edit_skin.update_player_skin then
@@ -381,6 +425,7 @@ end)
 -- ============================================
 
 local function update_sky(player)
+    if HF_IS_OVERWORLD then return end  -- небо станції задає custom_dimension
     local name = player:get_player_name()
     local hf_time_minutes = player_hf_times[name] or 780 -- Беремо час гравця
     
@@ -590,43 +635,57 @@ local function update_custom_hearts(player)
     end
 end
 
--- Створюємо серця при заході гравця на сервер
-minetest.register_on_joinplayer(function(player)
+-- Створити серця (10 HUD-елементів)
+local function create_hearts(player)
     local name = player:get_player_name()
-    
-    -- 1. Сховуємо стандартне здоров'я Luanti
-    player:hud_set_flags({ healthbar = false })
-
     player_hearts[name] = {}
 
-    -- Налаштування позиції на екрані (ставимо приблизно туди, де стандартні)
-    -- Позиція (0.5, 1) — це низ екрану, центр.
+    -- Позиція (0.5, 1) — низ екрану, центр.
     local base_pos = { x = 0.5, y = 1.0 }
-    
-    -- Зміщення в пікселях. Розраховуємо під мікро-пікселі (наприклад, масштаб 4x)
-    -- Оскільки текстура 8x8, збільшимо її до 32x32 пікселів на екрані
-    local size = 32 
+    -- текстура 8x8 збільшується до 32x32 пікселів на екрані
+    local size = 32
     local start_offset_x = -175 -- Початкова точка зліва від центру
     local offset_y = -86        -- Висота над хотбаром
 
-    -- Створюємо 10 елементів для сердець
     for i = 1, 10 do
         local hud_id = player:hud_add({
             hud_elem_type = "image",
             position = base_pos,
-            -- Розставляємо серця одне за одним в ряд
             offset = { x = start_offset_x + ((i - 1) * (size + 4)), y = offset_y },
             text = "heart_empty.png",
-            scale = { x = 4, y = 4 }, -- Збільшуємо пікселі у 4 рази (з 8x8 до 32x32)
+            scale = { x = 4, y = 4 },
             alignment = { x = 0, y = 0 },
         })
         table.insert(player_hearts[name], hud_id)
     end
+    update_custom_hearts(player)
+end
 
-    -- Оновлюємо відразу після створення
+-- Показати/сховати серця (у режимі командування їх немає)
+function human_fortress.set_hearts_visible(player, visible)
+    local name = player:get_player_name()
+    if visible then
+        if not player_hearts[name] then create_hearts(player) end
+    else
+        for _, id in ipairs(player_hearts[name] or {}) do
+            player:hud_remove(id)
+        end
+        player_hearts[name] = nil
+    end
+end
+
+-- Створюємо серця при заході гравця на сервер
+minetest.register_on_joinplayer(function(player)
+    local name = player:get_player_name()
+
+    -- Сховуємо стандартне здоров'я Luanti
+    player:hud_set_flags({ healthbar = false })
+
     minetest.after(0.1, function()
-        if minetest.get_player_by_name(name) then
-            update_custom_hearts(player)
+        local p = minetest.get_player_by_name(name)
+        if p and not player_hearts[name]
+                and not (human_fortress.rts and human_fortress.rts.is_active(name)) then
+            create_hearts(p)
         end
     end)
 end)
@@ -658,3 +717,7 @@ end)
 --    player:set_formspec_prepend(style .. background)
 --end)
 print("[Human Fortress RTS] Усі компоненти завантажено!")
+
+dofile(path .. "/spawn_fork.lua")
+dofile(path .. "/protection.lua")
+dofile(path .. "/mirror.lua")

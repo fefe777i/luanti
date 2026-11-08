@@ -76,6 +76,69 @@ function RTS.is_active(name)
     return active[name] ~= nil
 end
 
+-- ============================================
+-- МАНЕКЕН ГРАВЦЯ
+-- ============================================
+-- Поки гравець дивиться зверху, його справжній аватар невидимий (без ніка).
+-- Замість нього біля вилки стоїть манекен зі скіном і ніком гравця.
+
+local mannequins = {}  -- name -> ObjectRef
+
+minetest.register_entity("human_fortress:mannequin", {
+    initial_properties = {
+        visual = "mesh",
+        mesh = "character.b3d",
+        textures = { "character.png" },
+        physical = true,
+        collide_with_objects = false,
+        pointable = false,
+        static_save = false,
+        stepheight = 0.6,
+        collisionbox = { -0.3, 0.0, -0.3, 0.3, 1.7, 0.3 },
+        show_on_minimap = false,
+    },
+    on_activate = function(self)
+        self.object:set_acceleration({ x = 0, y = -9.8, z = 0 })
+    end,
+    on_step = function(self)
+        -- сирота (гравець вийшов з режиму або з гри) - зникаємо
+        if not self.owner or not active[self.owner] then
+            self.object:remove()
+        end
+    end,
+})
+
+local function remove_mannequin(name)
+    local m = mannequins[name]
+    if m and m:get_pos() then m:remove() end
+    mannequins[name] = nil
+end
+
+local function spawn_mannequin(player, pos)
+    local name = player:get_player_name()
+    remove_mannequin(name)
+    local obj = minetest.add_entity(pos, "human_fortress:mannequin")
+    if not obj then return end
+    local props = player:get_properties()
+    local ent = obj:get_luaentity()
+    if ent then ent.owner = name end
+    obj:set_properties({
+        mesh = props.mesh,
+        textures = props.textures,
+        visual_size = props.visual_size,
+        collisionbox = props.collisionbox,
+        nametag = name,
+        nametag_color = "#FFFFFF",
+    })
+    obj:set_yaw(player:get_look_horizontal())
+    obj:set_animation({ x = 0, y = 79 }, 30, 0, true)  -- стоїть
+    mannequins[name] = obj
+end
+
+minetest.register_on_leaveplayer(function(player)
+    remove_mannequin(player:get_player_name())
+end)
+
 function RTS.enter(player, base_pos)
     local name = player:get_player_name()
     if active[name] then return end
@@ -95,10 +158,18 @@ function RTS.enter(player, base_pos)
         active = "",
     }
     player:set_camera({ mode = "first", rts = params[name] })
+    -- манекена більше немає: у режимі командування немає ні моделі, ні скіна, ні ніка
     -- без прицілу й предмета в руці: камера дивиться зверху
     player:hud_set_flags({ crosshair = false, wielditem = false })
     -- аватар висить у повітрі під камерою - ховаємо його від усіх
     player:set_properties({ is_visible = false })
+    -- гравець без моделі/скіна/ніка (аватар і нік ховає gui.lua)
+    if human_fortress.update_player_model then human_fortress.update_player_model(player) end
+    -- без годинника й сердець
+    if human_fortress.set_clock_visible then human_fortress.set_clock_visible(player, false) end
+    if human_fortress.set_hearts_visible then human_fortress.set_hearts_visible(player, false) end
+    -- мінімапа з формиками
+    if human_fortress.minimap then human_fortress.minimap.enter(player) end
 end
 
 --- Панель кнопок рушія. list = { {key=, icon=, action=bool}, ... }
@@ -126,6 +197,21 @@ function RTS.set_active(player, key)
     return true
 end
 
+--- Перенести камеру до позиції pos (клієнт бере фокус із позиції гравця при вході в режим).
+function RTS.jump_to(player, pos)
+    local name = player:get_player_name()
+    local p = params[name]
+    if not p or not pos then return false end
+    player:set_pos({ x = pos.x, y = pos.y + 0.5, z = pos.z })
+    player:set_camera({ mode = "any", rts = false })
+    minetest.after(0.3, function()
+        if active[name] and params[name] == p and minetest.get_player_by_name(name) then
+            player:set_camera({ mode = "first", rts = p })
+        end
+    end)
+    return true
+end
+
 function RTS.exit(player)
     local name = player:get_player_name()
     local st = active[name]
@@ -134,9 +220,14 @@ function RTS.exit(player)
     params[name] = nil
 
     RTS.clear_rings(name)
+    remove_mannequin(name)
     player:set_camera({ mode = "any", rts = false })
     player:hud_set_flags({ crosshair = true, wielditem = true })
     player:set_properties({ is_visible = st.was_visible })
+    if human_fortress.update_player_model then human_fortress.update_player_model(player) end
+    if human_fortress.set_clock_visible then human_fortress.set_clock_visible(player, true) end
+    if human_fortress.set_hearts_visible then human_fortress.set_hearts_visible(player, true) end
+    if human_fortress.minimap then human_fortress.minimap.exit(player) end
 end
 
 -- ============================================
@@ -166,6 +257,39 @@ minetest.register_entity("human_fortress:select_ring", {
     end,
 })
 
+-- Рамка-хітбокс навколо виділеного юніта (куб з прозорою серединою), бачить лише власник
+minetest.register_entity("human_fortress:select_frame", {
+    initial_properties = {
+        visual = "cube",
+        textures = { "hf_select_frame.png", "hf_select_frame.png", "hf_select_frame.png",
+                     "hf_select_frame.png", "hf_select_frame.png", "hf_select_frame.png" },
+        visual_size = { x = 1, y = 1, z = 1 },
+        use_texture_alpha = true,
+        backface_culling = false,
+        shaded = false,
+        glow = 14,
+        physical = false,
+        collide_with_objects = false,
+        pointable = false,
+        static_save = false,
+    },
+    on_activate = function(self, staticdata)
+        if staticdata and staticdata ~= "" then
+            self.object:set_observers({ [staticdata] = true })
+        end
+    end,
+})
+
+local frames = {}  -- frames[name][uid] = ObjectRef
+
+local function frame_box(obj)
+    local props = obj:get_properties()
+    local cb = props and props.collisionbox or { -0.3, 0, -0.3, 0.3, 1.7, 0.3 }
+    local size = { x = (cb[4] - cb[1]) + 0.08, y = (cb[5] - cb[2]) + 0.08, z = (cb[6] - cb[3]) + 0.08 }
+    local off = { x = (cb[1] + cb[4]) / 2, y = (cb[2] + cb[5]) / 2, z = (cb[3] + cb[6]) / 2 }
+    return size, off
+end
+
 local function ring_size(obj)
     local props = obj:get_properties()
     local cb = props and props.collisionbox or { -0.3, 0, -0.3, 0.3, 1.7, 0.3 }
@@ -174,6 +298,10 @@ local function ring_size(obj)
 end
 
 function RTS.clear_rings(name)
+    for _, fr in pairs(frames[name] or {}) do
+        if fr:get_pos() then fr:remove() end
+    end
+    frames[name] = nil
     local list = rings[name]
     if not list then return end
     for _, ring in pairs(list) do
@@ -191,6 +319,15 @@ function RTS.sync(name)
 
     local want = {}
     for _, uid in ipairs(get_selected(name)) do want[uid] = true end
+
+    frames[name] = frames[name] or {}
+    local myframes = frames[name]
+    for uid, fr in pairs(myframes) do
+        if not want[uid] then
+            if fr:get_pos() then fr:remove() end
+            myframes[uid] = nil
+        end
+    end
 
     -- прибрати рамки з тих, кого більше не виділено
     for uid, ring in pairs(mine) do
@@ -227,10 +364,27 @@ function RTS.sync(name)
             elseif ring then
                 ring:move_to(target, true)
             end
+            -- рамка-хітбокс навколо юніта
+            local fsize, foff = frame_box(obj)
+            local fpos = { x = pos.x + foff.x, y = pos.y + foff.y, z = pos.z + foff.z }
+            local fr = myframes[uid]
+            if not fr or not fr:get_pos() then
+                fr = minetest.add_entity(fpos, "human_fortress:select_frame", name)
+                if fr then
+                    fr:set_properties({ visual_size = fsize })
+                    myframes[uid] = fr
+                end
+            else
+                fr:move_to(fpos, true)
+            end
         elseif ring then
             -- юніт у сплячому чанку або загинув
             if ring:get_pos() then ring:remove() end
             mine[uid] = nil
+        end
+        if not obj and myframes[uid] then
+            if myframes[uid]:get_pos() then myframes[uid]:remove() end
+            myframes[uid] = nil
         end
     end
 end
@@ -262,6 +416,12 @@ end
 --- Який наказ виконує юніт і куди. Повертає order, target_pos або nil.
 function RTS.get_order(ent)
     local ud = ent.unit_data or {}
+    -- наказ атаки показуємо лише бойовим юнітам (робітники не воюють)
+    local combat = human_fortress.is_combat_unit and human_fortress.is_combat_unit(ent)
+    if not combat and (ent.order == "attack_target" or ent.order == "attack"
+            or ud.command == "attack") then
+        return nil
+    end
     -- наказ щойно відправлено, юніт ще його не прочитав
     if ud.command and is_pos(ud.target) then
         return ud.command, ud.target

@@ -255,6 +255,13 @@ static scene::SMesh *generateNodeMesh(Client *client, MapNode n,
 	GenericCAO
 */
 
+// Форк: власне тіло від першої особи + серверні анімації для локального гравця.
+// Вимкнути можна в minetest.conf: fp_own_body = false
+static bool fpOwnBody()
+{
+	return !g_settings->exists("fp_own_body") || g_settings->getBool("fp_own_body");
+}
+
 GenericCAO::GenericCAO(Client *client, ClientEnvironment *env):
 		ClientActiveObject(0, client, env)
 {
@@ -991,7 +998,7 @@ void GenericCAO::step(float dtime, ClientEnvironment *env)
 		m_rotation.Y = wrapDegrees_0_360(player->getYaw());
 		rot_translator.val_current = m_rotation;
 
-		if (m_is_visible) {
+		if (m_is_visible && !fpOwnBody()) {
 			m_velocity = v3f(0,0,0);
 			m_acceleration = v3f(0,0,0);
 			const PlayerControl &controls = player->getPlayerControl();
@@ -1559,7 +1566,7 @@ void GenericCAO::applyTrackAnimation(scene::TrackId &&track_id, scene::TrackAnim
 
 	anim.cur_frame = std::clamp(anim.cur_frame, anim.min_frame, anim.max_frame);
 
-	if (!m_is_local_player) {
+	if (!m_is_local_player || fpOwnBody()) {
 		m_animation.tracks[*track_nr] = anim;
 		updateAnimation(*track_nr);
 	} else {
@@ -1941,7 +1948,8 @@ void GenericCAO::updateMeshCulling()
 	if (!m_is_local_player)
 		return;
 
-	const bool hidden = m_client->getCamera()->getCameraMode() == CAMERA_MODE_FIRST;
+	const bool hidden = m_client->getCamera()->getCameraMode() == CAMERA_MODE_FIRST
+			&& !fpOwnBody();
 
 	scene::ISceneNode *node = getSceneNode();
 

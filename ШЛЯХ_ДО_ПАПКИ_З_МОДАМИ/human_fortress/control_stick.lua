@@ -63,6 +63,37 @@ local function find_unit_by_id(unit_id)
     return nil, nil
 end
 
+-- Тап трохи повз сутність (камера зверху, промінь часто влучає в землю за нею):
+-- шукаємо юніта або шакала біля точки, куди влучив промінь.
+local PICK_RADIUS = 2.0
+local function pick_entity_near(pointed_thing, filter)
+    if not pointed_thing or pointed_thing.type ~= "node" then return nil end
+    local ip = pointed_thing.intersection_point
+    if not ip then
+        local u = pointed_thing.under
+        if not u then return nil end
+        ip = { x = u.x, y = u.y + 0.5, z = u.z }
+    end
+
+    local best, best_d
+    for _, obj in ipairs(minetest.get_objects_inside_radius(ip, PICK_RADIUS + 2)) do
+        if not obj:is_player() then
+            local ent = obj:get_luaentity()
+            if ent and (ent.unit_data or ent.jackal_data) and (not filter or filter(ent)) then
+                local op = obj:get_pos()
+                if op and op.y - ip.y >= -1.5 and op.y - ip.y <= 3.5 then
+                    local dx, dz = op.x - ip.x, op.z - ip.z
+                    local d = math.sqrt(dx * dx + dz * dz)
+                    if d <= PICK_RADIUS and (not best_d or d < best_d) then
+                        best, best_d = obj, d
+                    end
+                end
+            end
+        end
+    end
+    return best
+end
+
 local function get_selected_unit_ids(player)
     local name = player:get_player_name()
     if not human_fortress.players or not human_fortress.players[name] then return {} end
@@ -74,8 +105,37 @@ local function set_selected_unit_ids(player, ids)
     if not human_fortress.players then human_fortress.players = {} end
     if not human_fortress.players[name] then human_fortress.players[name] = {selected_ids = {}} end
     human_fortress.players[name].selected_ids = ids
+    -- виділили юнітів - панель будівлі більше не потрібна
+    if #ids > 0 then human_fortress.players[name].selected_building = nil end
     if human_fortress.rts and human_fortress.rts.is_active(name) then
         human_fortress.rts.sync(name)
+    end
+end
+
+-- Вибрати будівлю/майданчик для панелі статистики (kind = "core" | "site")
+local function select_building(name, sel)
+    if not human_fortress.players then human_fortress.players = {} end
+    if not human_fortress.players[name] then human_fortress.players[name] = {selected_ids = {}} end
+    human_fortress.players[name].selected_building = sel
+end
+
+-- Виділені формики йдуть будувати майданчик sid
+local function join_construction(user, sid)
+    local name = user:get_player_name()
+    local ents = {}
+    for _, uid in ipairs(get_selected_unit_ids(user)) do
+        local _, ent = find_unit_by_id(uid)
+        if ent then ents[#ents + 1] = ent end
+    end
+    if #ents == 0 then
+        minetest.chat_send_player(name, "⚠️ Спочатку виділи формика, потім ➡️ Рух і тап по будівлі")
+        return
+    end
+    local added = human_fortress.construction_join(sid, ents)
+    if added > 0 then
+        minetest.chat_send_player(name, "🏗️ Будувати йдуть: " .. added)
+    else
+        minetest.chat_send_player(name, "ℹ️ Нікого додати: вони вже будують або будівельників забагато")
     end
 end
 
@@ -89,14 +149,22 @@ local function send_command_to_selected(player, command, target)
 
     local sent = 0
     local queued = 0
+    local skipped = 0
 
     for _, unit_id in ipairs(ids) do
         local obj, ent = find_unit_by_id(unit_id)
-        if ent then
+        if command == "attack" and ent and not human_fortress.is_combat_unit(ent) then
+            -- робітники не воюють: наказ атаки їм не віддаємо
+            skipped = skipped + 1
+        elseif ent then
             ent.unit_data = ent.unit_data or {}
             ent.unit_data.command = command
             ent.unit_data.target = target
             sent = sent + 1
+        elseif command == "attack" and human_fortress.registry
+                and human_fortress.registry.get(unit_id)
+                and not human_fortress.is_combat_unit({name = human_fortress.registry.get(unit_id).n}) then
+            skipped = skipped + 1
         else
             human_fortress.pending_commands[unit_id] = {
                 command = command,
@@ -107,6 +175,9 @@ local function send_command_to_selected(player, command, target)
         end
     end
 
+    if skipped > 0 then
+        minetest.chat_send_player(name, "⚠️ " .. skipped .. " виділених юнітів не воюють - атаку не виконують")
+    end
     if sent > 0 then
         minetest.chat_send_player(name, "📡 Команду відправлено " .. sent .. " юнітам")
     end
@@ -130,6 +201,12 @@ local BUILDING_PREVIEWS = {
     carpenter_workshop = { label = "🪚 Плотницька", preview_node = "default:wood" },
     market   = { label = "🏪 Ринок",   preview_node = "default:junglewood" },
     warehouse = { label = "📦 Склад",  preview_node = "default:chest" },
+    auto_collector = { label = "⚙️ Автозбірник", preview_node = "default:steelblock" },
+    pier     = { label = "⚓ Пірс",     preview_node = "default:acacia_wood" },
+    warehouse_branch = { label = "🏪 Філія складу", preview_node = "default:pine_wood" },
+    archer_tower = { label = "🏹 Башта лучників", preview_node = "default:stonebrick" },
+    bank = { label = "🏦 Банк", preview_node = "default:goldblock" },
+    lizard_nest = { label = "🦎 Гніздо ящерів", preview_node = "default:cobble" },
 }
 
 -- ============================================
@@ -167,6 +244,7 @@ local MAIN_BUTTONS = {
     {key = "enter",   tool = "human_fortress:cmd_enter",   icon = "my_button.png^human_fortress_cmd_enter.png"},
     {key = "repair",  tool = "human_fortress:cmd_repair",  icon = "my_button.png^human_fortress_cmd_repair.png"},
     {key = "destroy", tool = "human_fortress:cmd_destroy", icon = "my_button.png^human_fortress_cmd_destroy.png"},
+    {key = "idle",    tool = "human_fortress:cmd_select",  icon = "my_button.png^human_fortress_cmd_idle.png"},
     {key = "box",     tool = "human_fortress:cmd_box",     icon = "my_button.png^human_fortress_cmd_box.png"},
     {key = "deselect", tool = "human_fortress:cmd_select", icon = "my_button.png^human_fortress_cmd_deselect.png"},
     {key = "exit",    tool = "human_fortress:cmd_exit",    icon = "my_button.png^human_fortress_cmd_exit.png"},
@@ -184,7 +262,7 @@ for _, b in ipairs(MAIN_BUTTONS) do BUTTON_LOOKUP[b.key] = b end
 for _, b in ipairs(BUILD_BUTTONS) do BUTTON_LOOKUP[b.key] = b end
 
 -- Кнопки-дії одноразові: вони не лишаються підсвіченими як вибраний інструмент
-local ACTION_KEYS = { deselect = true, exit = true, b_rotate = true, b_confirm = true, b_cancel = true }
+local ACTION_KEYS = { idle = true, deselect = true, exit = true, b_rotate = true, b_confirm = true, b_cancel = true }
 
 -- інструмент -> ключ кнопки (для підсвітки вибраного інструмента)
 local TOOL_KEY = {}
@@ -257,12 +335,117 @@ local function select_tool(player, tool_name)
     end
 end
 
+-- ============================================
+-- БЕЗРОБІТНІ ЮНІТИ
+-- ============================================
+-- Кнопка 💤: виділяє наступного безробітного юніта, переносить на нього камеру,
+-- підсвічує променем і пише напрямок/відстань.
+
+local IDLE_KINDS = {
+    ["human_fortress:worker"] = "Робітник",
+    ["human_fortress:miner"] = "Шахтар",
+    ["human_fortress:lumberjack"] = "Дроворуб",
+    ["human_fortress:farmer"] = "Фермер",
+    ["human_fortress:fisherman"] = "Рибалка",
+    ["human_fortress:elite_fisherman"] = "Елітний рибалка",
+}
+local idle_index = {}
+
+local function is_idle_entity(ent)
+    if not ent or not IDLE_KINDS[ent.name] then return false end
+    local o = ent.order
+    return (o == nil or o == "stand") and not (ent.unit_data and ent.unit_data.command)
+end
+
+local function compass(dx, dz)
+    local ang = math.deg(math.atan2(dx, dz))   -- 0 = північ (+z)
+    local names = {"північ", "північний схід", "схід", "південний схід",
+        "південь", "південний захід", "захід", "північний захід"}
+    return names[(math.floor((ang + 22.5) / 45) % 8) + 1]
+end
+
+function human_fortress.show_next_idle(player)
+    local name = player:get_player_name()
+    local list = {}
+
+    -- прогружені юніти: достовірний стан
+    local seen = {}
+    local R = human_fortress.registry
+    if R then
+        for _, id in ipairs(R.list(name)) do
+            local rec = R.get(id)
+            if rec and IDLE_KINDS[rec.n] then
+                local obj, ent = find_unit_by_id(id)
+                if ent then
+                    if is_idle_entity(ent) then
+                        list[#list + 1] = {id = id, pos = obj:get_pos(), kind = IDLE_KINDS[rec.n]}
+                    end
+                else
+                    -- чанк не прогружений: беремо останню відому позицію
+                    list[#list + 1] = {id = id, pos = rec.p, kind = IDLE_KINDS[rec.n], unknown = true}
+                end
+                seen[id] = true
+            end
+        end
+    end
+    -- юніти поза реєстром (поки не встигли записатись)
+    for _, obj in ipairs(minetest.get_objects_inside_radius(player:get_pos(), 150)) do
+        local ent = obj:get_luaentity()
+        local ud = ent and ent.unit_data
+        if ud and ud.owner == name and ud.unit_id and not seen[ud.unit_id] and is_idle_entity(ent) then
+            list[#list + 1] = {id = ud.unit_id, pos = obj:get_pos(), kind = IDLE_KINDS[ent.name]}
+        end
+    end
+
+    if #list == 0 then
+        minetest.chat_send_player(name, "✅ Безробітних юнітів немає")
+        return
+    end
+    table.sort(list, function(a, b) return a.id < b.id end)
+
+    local i = (idle_index[name] or 0) % #list + 1
+    idle_index[name] = i
+    local u = list[i]
+
+    set_selected_unit_ids(player, {u.id})
+
+    local ppos = player:get_pos()
+    local cam = human_fortress.rts and human_fortress.rts.is_active(name)
+    if cam and human_fortress.rts.jump_to then
+        human_fortress.rts.jump_to(player, u.pos)
+    end
+
+    -- промінь над юнітом, видно здалеку
+    for k = 0, 24 do
+        minetest.add_particle({
+            pos = {x = u.pos.x, y = u.pos.y + 1 + k * 0.5, z = u.pos.z},
+            velocity = {x = 0, y = 0, z = 0},
+            expirationtime = 4,
+            size = 5,
+            texture = "human_fortress_rts_dot.png^[multiply:#ffd84c",
+            glow = 14,
+            playername = name,
+        })
+    end
+
+    local dx, dz = u.pos.x - ppos.x, u.pos.z - ppos.z
+    local dist = math.floor(math.sqrt(dx * dx + dz * dz) + 0.5)
+    minetest.chat_send_player(name, string.format(
+        "💤 Безробітний %s (%d з %d) — %s, %d блоків%s",
+        u.kind, i, #list, compass(dx, dz), dist, u.unknown and " (чанк спить)" or ""))
+end
+
 local function handle_button(player, key)
     local b = BUTTON_LOOKUP[key]
     if not b then return end
 
     local name = player:get_player_name()
     if not cmd_mode[name] then return end
+
+    if key == "idle" then
+        human_fortress.show_next_idle(player)
+        return
+    end
 
     if key == "deselect" then
         set_selected_unit_ids(player, {})
@@ -472,6 +655,39 @@ local function build_structure(player_name, building_type, pos, rotation)
         return false
     end
 
+    if human_fortress.check_build_limit then
+        local okl, msgl = human_fortress.check_build_limit(player_name, building_type, pos)
+        if not okl then
+            minetest.chat_send_player(player_name, "❌ " .. msgl)
+            return false
+        end
+    end
+
+    if schematic.can_build then
+        local ok, msg = schematic.can_build(player_name, pos)
+        if not ok then
+            minetest.chat_send_player(player_name, "❌ " .. tostring(msg or "Тут не можна будувати"))
+            return false
+        end
+    end
+
+    -- будують ВИДІЛЕНІ формики (будь-які)
+    local builders = {}
+    if human_fortress.start_construction and not human_fortress.is_overworld then
+        local pl = minetest.get_player_by_name(player_name)
+        for _, uid in ipairs(pl and get_selected_unit_ids(pl) or {}) do
+            local _, ent = find_unit_by_id(uid)
+            if ent and ent.object and ent.object:get_pos() and not ent.build_lock then
+                builders[#builders + 1] = ent
+            end
+        end
+        if #builders == 0 then
+            minetest.chat_send_player(player_name,
+                "❌ Для будівництва виділи формика(ів): вони і будуватимуть. Без будівельників будівля не зводиться.")
+            return false
+        end
+    end
+
     if human_fortress.edos_data and human_fortress.edos_data[player_name] and schematic.cost then
         local resources = human_fortress.edos_data[player_name]
         for res, amount in pairs(schematic.cost) do
@@ -494,20 +710,24 @@ local function build_structure(player_name, building_type, pos, rotation)
     end
     file:close()
 
-    local rotation_str = tostring(rotation)
-    local result = minetest.place_schematic(pos, filepath, rotation_str, nil, false)
-
-    if not result then
-        minetest.chat_send_player(player_name, "❌ Не вдалося звести будівлю!")
-        return false
+    local function finish()
+        local result = minetest.place_schematic(pos, filepath, tostring(rotation), nil, false)
+        if not result then
+            minetest.chat_send_player(player_name, "❌ Не вдалося звести будівлю!")
+            return false
+        end
+        if schematic.on_built then
+            schematic.on_built(player_name, pos, rotation)
+        end
+        minetest.chat_send_player(player_name, "🏗️ Будівлю зведено!")
+        return true
     end
 
-    if schematic.on_built then
-        schematic.on_built(player_name, pos)
+    if human_fortress.start_construction and not human_fortress.is_overworld then
+        local ok = human_fortress.start_construction(player_name, building_type, pos, rotation, filepath, finish, builders)
+        if ok then return true end
     end
-
-    minetest.chat_send_player(player_name, "🏗️ Будівлю зведено!")
-    return true
+    return finish()
 end
 
 local function give_build_inventory(player, building_type)
@@ -591,6 +811,25 @@ local function enter_command_mode(player)
     select_tool(player, "human_fortress:cmd_select")
 
     minetest.chat_send_player(name, "🎮 Режим командування активовано!")
+
+    -- перший вхід: біля вилки з'являється один безкоштовний формик, щоб побудувати Ратушу
+    if not human_fortress.is_overworld and human_fortress.create_unit and get_player_data then
+        local pd = get_player_data(name)
+        if pd and not pd.starter_worker and pd.fork_pos then
+            local fp = pd.fork_pos
+            local sp = {x = fp.x + 2, y = fp.y, z = fp.z + 1}
+            local obj = human_fortress.create_unit("worker", sp, name, true)
+            if obj then
+                pd.starter_worker = true
+                if save_fortress_data then save_fortress_data() end
+                local ent = obj:get_luaentity()
+                local uid = ent and ent.unit_data and ent.unit_data.unit_id
+                if uid then set_selected_unit_ids(player, {uid}) end
+                minetest.chat_send_player(name,
+                    "👷 Біля вилки з'явився формик-будівельник (він уже виділений). Обери будівлю «Ратуша» і підтверди будівництво.")
+            end
+        end
+    end
 end
 
 exit_command_mode = function(player)
@@ -865,8 +1104,10 @@ minetest.register_tool("human_fortress:cmd_sight", {
         local name = user:get_player_name()
         if not cmd_mode[name] then return itemstack end
 
-        if pointed_thing and pointed_thing.type == "object" then
-            local ent = pointed_thing.ref and pointed_thing.ref:get_luaentity()
+        local sight_ref = pointed_thing and (pointed_thing.type == "object" and pointed_thing.ref
+            or pick_entity_near(pointed_thing, function(e) return e.unit_data end))
+        if sight_ref then
+            local ent = sight_ref:get_luaentity()
             if ent and ent.unit_data and ent.unit_data.unit_id then
                 if ent.unit_data.owner ~= name then
                     minetest.chat_send_player(name, "⚠️ Це не твій юніт!")
@@ -922,15 +1163,32 @@ end)
 local last_unit_tap = {}
 local DOUBLE_TAP_TIME = 0.5
 
-local function select_all_own(user, radius, center, same_kind)
+local function select_all_own(user, radius, center, same_kind, everywhere)
     local name = user:get_player_name()
-    local ids = {}
+    local ids, seen = {}, {}
     local objs = minetest.get_objects_inside_radius(center, radius)
     for _, obj in ipairs(objs) do
         local ent = obj:get_luaentity()
         if ent and ent.unit_data and ent.unit_data.owner == name and ent.unit_data.unit_id
-                and (not same_kind or ent.name == same_kind) then
+                and (not same_kind or ent.name == same_kind)
+                and not seen[ent.unit_data.unit_id] then
+            seen[ent.unit_data.unit_id] = true
             table.insert(ids, ent.unit_data.unit_id)
+        end
+    end
+
+    -- + юніти з реєстру, навіть якщо їхній чанк зараз не прогружений
+    local R = human_fortress.registry
+    if R then
+        local opts = { name = same_kind }
+        if not everywhere then
+            opts.center, opts.radius = center, radius
+        end
+        for _, id in ipairs(R.list(name, opts)) do
+            if not seen[id] then
+                seen[id] = true
+                table.insert(ids, id)
+            end
         end
     end
     return ids
@@ -946,8 +1204,19 @@ minetest.register_tool("human_fortress:cmd_select", {
         local selected = get_selected_unit_ids(user)
         local rts = human_fortress.rts
 
-        if pointed_thing and pointed_thing.type == "object" then
-            local obj = pointed_thing.ref
+        local picked = pointed_thing and (pointed_thing.type == "object" and pointed_thing.ref
+            or pick_entity_near(pointed_thing))
+
+        local pent = picked and picked:get_luaentity()
+        if pent and pent.is_build_site then
+            if pent.owner == name then
+                select_building(name, {kind = "site", id = pent.job_id})
+            end
+            return itemstack
+        end
+
+        if picked then
+            local obj = picked
             local ent = obj and obj:get_luaentity()
             local ud = ent and ent.unit_data
 
@@ -962,32 +1231,41 @@ minetest.register_tool("human_fortress:cmd_select", {
                     minetest.chat_send_player(name, "✅ Виділено однотипних юнітів: " .. #ids)
                     last_unit_tap[name] = nil
                 else
-                    if #selected == 1 and selected[1] == uid then
-                        set_selected_unit_ids(user, {})
-                    else
-                        set_selected_unit_ids(user, {uid})
+                    -- виділення по одному: тап додає юніта до виділених, повторний тап - прибирає
+                    local new_ids, found = {}, false
+                    for _, id in ipairs(selected) do
+                        if id == uid then found = true else new_ids[#new_ids + 1] = id end
                     end
+                    if not found then new_ids[#new_ids + 1] = uid end
+                    set_selected_unit_ids(user, new_ids)
                     last_unit_tap[name] = { uid = uid, t = now }
                 end
-            elseif #selected > 0 and obj then
-                -- ворог (чужий юніт або моб): атакуємо
-                local p = obj:get_pos()
-                if p then
-                    local sent, queued = send_command_to_selected(user, "attack", p)
-                    if sent + queued > 0 and rts then
-                        rts.flash(name, p, rts.color_for("attack"))
-                    end
+            else
+                -- чужий юніт / шакал: інструмент виділення нічого не наказує.
+                -- Атакувати - кнопкою "Атака", йти - кнопкою "Рух".
+                if #selected > 0 then
+                    minetest.chat_send_player(name, "ℹ️ Для атаки обери кнопку ⚔️ Атака")
                 end
             end
 
         elseif pointed_thing and pointed_thing.type == "node" then
             local pos = pointed_thing.under
+            -- тап по будівлі / майданчику: показати її статистику
+            local core = human_fortress.building_at and human_fortress.building_at(pos, name)
+            if core then
+                select_building(name, {kind = "core", pos = core})
+                return itemstack
+            end
+            local sid = human_fortress.construction_at and human_fortress.construction_at(pos, name)
+            if sid then
+                select_building(name, {kind = "site", id = sid})
+                return itemstack
+            end
+            if human_fortress.players[name] then human_fortress.players[name].selected_building = nil end
             if #selected > 0 then
-                local target = { x = pos.x, y = pos.y + 1, z = pos.z }
-                local sent, queued = send_command_to_selected(user, "move", target)
-                if sent + queued > 0 and rts then
-                    rts.flash(name, { x = pos.x, y = pos.y + 1, z = pos.z }, rts.color_for("move"))
-                end
+                -- тап по землі інструментом виділення = зняти виділення (як у RTS)
+                set_selected_unit_ids(user, {})
+                minetest.chat_send_player(name, "❎ Виділення знято (щоб іти - кнопка ➡️ Рух)")
             else
                 local ids = select_all_own(user, 10, pos)
                 set_selected_unit_ids(user, ids)
@@ -1001,7 +1279,7 @@ minetest.register_tool("human_fortress:cmd_select", {
     on_place = function(itemstack, placer)
         local name = placer:get_player_name()
         if not cmd_mode[name] then return end
-        local ids = select_all_own(placer, 100, placer:get_pos())
+        local ids = select_all_own(placer, 100, placer:get_pos(), nil, true)
         set_selected_unit_ids(placer, ids)
         minetest.chat_send_player(name, "✅ Виділено ВСІХ юнітів: " .. #ids)
         return itemstack
@@ -1009,7 +1287,7 @@ minetest.register_tool("human_fortress:cmd_select", {
     on_secondary_use = function(itemstack, placer)
         local name = placer:get_player_name()
         if not cmd_mode[name] then return end
-        local ids = select_all_own(placer, 100, placer:get_pos())
+        local ids = select_all_own(placer, 100, placer:get_pos(), nil, true)
         set_selected_unit_ids(placer, ids)
         minetest.chat_send_player(name, "✅ Виділено ВСІХ юнітів: " .. #ids)
         return itemstack
@@ -1087,8 +1365,22 @@ minetest.register_tool("human_fortress:cmd_move", {
         local name = user:get_player_name()
         if not cmd_mode[name] then return end
 
+        -- тап по майданчику будівлі - виділені формики йдуть її будувати
+        if pointed_thing and pointed_thing.type == "object" and pointed_thing.ref then
+            local pent = pointed_thing.ref:get_luaentity()
+            if pent and pent.is_build_site and pent.owner == name then
+                join_construction(user, pent.job_id)
+                return itemstack
+            end
+        end
+
         if pointed_thing and pointed_thing.type == "node" then
             local pos = pointed_thing.under
+            local sid = human_fortress.construction_at and human_fortress.construction_at(pos, name)
+            if sid then
+                join_construction(user, sid)
+                return itemstack
+            end
             local target = { x = pos.x + 0.5, y = pos.y + 1, z = pos.z + 0.5 }
             local sent, queued = send_command_to_selected(user, "move", target)
             if sent + queued > 0 then
@@ -1174,11 +1466,11 @@ minetest.register_tool("human_fortress:cmd_build", {
 
             local my_upgrades = get_player_upgrades(name)
 
-            local fs = "size[6,9]" ..
+            local fs = "size[6.6,9]" ..
                 "bgcolor[#0A0A1A;true]" ..
-                "box[0,0;6,0.8;#2D2D44]" ..
+                "box[0,0;6.6,0.8;#2D2D44]" ..
                 "label[0.5,0.2;🏗️ ВИБІР БУДІВЛІ]"
-            local x = 0.4
+            local x = 0.3
 local y = 1.1
 local column = 0
 
@@ -1205,19 +1497,19 @@ for btype, bdata in pairs(BUILDING_PREVIEWS) do
         local tooltip = (schematic.name or bdata.label) .. "\n" .. cost_text
 
         fs = fs ..
-            "image_button[" .. x .. "," .. y .. ";1.5,1.5;" ..
+            "image_button[" .. x .. "," .. y .. ";1.3,1.3;" ..
             minetest.formspec_escape(icon) .. ";build_" .. btype .. ";]" ..
-            "tooltip[" .. x .. "," .. y .. ";1.5,1.5;" ..
+            "tooltip[" .. x .. "," .. y .. ";1.3,1.3;" ..
             minetest.formspec_escape(tooltip) .. "]"
 
         column = column + 1
 
-        if column >= 3 then
+        if column >= 4 then
             column = 0
-            x = 0.4
-            y = y + 2.0
+            x = 0.3
+            y = y + 1.7
         else
-            x = x + 1.85
+            x = x + 1.55
         end
     end
 end
@@ -1271,9 +1563,12 @@ minetest.register_tool("human_fortress:cmd_attack", {
         if not cmd_mode[name] then return end
 
         local target_pos = nil
-        if pointed_thing and pointed_thing.type == "object" then
-            local obj = pointed_thing.ref
-            if obj then target_pos = obj:get_pos() end
+        local atk_ref = pointed_thing and (pointed_thing.type == "object" and pointed_thing.ref
+            or pick_entity_near(pointed_thing, function(e)
+                return human_fortress.is_hostile_to(e, name)
+            end))
+        if atk_ref then
+            target_pos = atk_ref:get_pos()
         elseif pointed_thing and pointed_thing.type == "node" then
             target_pos = pointed_thing.under
         end
