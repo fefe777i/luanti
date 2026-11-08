@@ -8,6 +8,7 @@
 #include <IMeshManipulator.h>
 #include <ISceneNode.h>
 #include <AnimatedMeshSceneNode.h>
+#include <BoneSceneNode.h>
 #include "client/client.h"
 #include "client/renderingengine.h"
 #include "client/sound.h"
@@ -41,6 +42,7 @@
 #include <CMeshBuffer.h>
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <variant>
 #include <optional>
@@ -550,6 +552,10 @@ void GenericCAO::removeFromScene(bool permanent)
 		m_animated_meshnode->remove();
 		m_animated_meshnode->drop();
 		m_animated_meshnode = nullptr;
+		m_fp_head_joints.clear();
+		m_fp_head_saved_scale.clear();
+		m_fp_head_scanned = false;
+		m_fp_head_hidden = false;
 	} else if (m_wield_meshnode) {
 		m_wield_meshnode->remove();
 		m_wield_meshnode->drop();
@@ -737,6 +743,9 @@ void GenericCAO::addToScene(ITextureSource *tsrc, scene::ISceneManager *smgr)
 					}
 					++it;
 				}
+				// Форк: у першій особі ховаємо голову власного тіла
+				if (m_is_local_player)
+					updateFirstPersonHead();
 			});
 		} else
 			errorstream<<"GenericCAO::addToScene(): Could not load mesh "<<m_prop.mesh<<std::endl;
@@ -1941,6 +1950,91 @@ std::string GenericCAO::debugInfoText()
 	}
 	os<<"}";
 	return os.str();
+}
+
+// Форк: від першої особи камера знаходиться всередині голови власної моделі,
+// тому голову треба прибрати, залишивши тіло. Кістка голови стискається до
+// майже нульового масштабу (разом з усім, що до неї прикріплено).
+// Налаштування в minetest.conf:
+//   fp_hide_head = false      - не ховати голову
+//   fp_head_bone = Head       - точна назва кістки голови (інакше шукається
+//                               перша кістка, в назві якої є "head")
+void GenericCAO::updateFirstPersonHead()
+{
+	if (!m_animated_meshnode || !m_client)
+		return;
+
+	const bool want_hidden = fpOwnBody() &&
+			(!g_settings->exists("fp_hide_head") || g_settings->getBool("fp_hide_head")) &&
+			m_client->getCamera()->getCameraMode() == CAMERA_MODE_FIRST;
+
+	if (!m_fp_head_scanned) {
+		m_fp_head_scanned = true;
+		m_fp_head_joints.clear();
+
+		const std::string forced = g_settings->exists("fp_head_bone") ?
+				g_settings->get("fp_head_bone") : "";
+		const u32 count = m_animated_meshnode->getJointCount();
+		for (u32 i = 0; i < count; i++) {
+			auto *bone = m_animated_meshnode->getJointNode(i);
+			if (!bone || !bone->getName().has_value())
+				continue;
+			const std::string &name = *bone->getName();
+			bool match;
+			if (!forced.empty()) {
+				match = name == forced;
+			} else {
+				std::string lower = name;
+				std::transform(lower.begin(), lower.end(), lower.begin(),
+						[](unsigned char ch) { return std::tolower(ch); });
+				match = lower.find("head") != std::string::npos;
+			}
+			if (!match)
+				continue;
+			// якщо предок уже в списку - масштабу предка досить
+			bool ancestor_listed = false;
+			for (scene::ISceneNode *p = bone->getParent(); p; p = p->getParent()) {
+				auto *pb = dynamic_cast<scene::BoneSceneNode *>(p);
+				if (pb && std::find(m_fp_head_joints.begin(), m_fp_head_joints.end(),
+						pb->getBoneIndex()) != m_fp_head_joints.end()) {
+					ancestor_listed = true;
+					break;
+				}
+			}
+			if (!ancestor_listed)
+				m_fp_head_joints.push_back(bone->getBoneIndex());
+		}
+		if (m_fp_head_joints.empty())
+			infostream << "GenericCAO: no head bone found in mesh "
+					<< m_prop.mesh << " (set fp_head_bone)" << std::endl;
+	}
+
+	if (m_fp_head_joints.empty())
+		return;
+
+	if (want_hidden) {
+		// Анімація скидає трансформації кісток кожен кадр (до виклику цього
+		// колбеку), тому застосовуємо масштаб щоразу.
+		if (!m_fp_head_hidden)
+			m_fp_head_saved_scale.clear();
+		for (size_t k = 0; k < m_fp_head_joints.size(); k++) {
+			auto *bone = m_animated_meshnode->getJointNode(m_fp_head_joints[k]);
+			if (!bone)
+				continue;
+			if (!m_fp_head_hidden)
+				m_fp_head_saved_scale.push_back(bone->getScale());
+			bone->setScale(v3f(0.0001f));
+		}
+		m_fp_head_hidden = true;
+	} else if (m_fp_head_hidden) {
+		// Повернути масштаб (для статичних мешів анімація його не скине)
+		for (size_t k = 0; k < m_fp_head_joints.size() &&
+				k < m_fp_head_saved_scale.size(); k++) {
+			if (auto *bone = m_animated_meshnode->getJointNode(m_fp_head_joints[k]))
+				bone->setScale(m_fp_head_saved_scale[k]);
+		}
+		m_fp_head_hidden = false;
+	}
 }
 
 void GenericCAO::updateMeshCulling()

@@ -141,6 +141,14 @@ private:
 	// stores position and rotation for each bone name
 	BoneOverrideMap m_bone_override;
 
+	// Форк: приховування голови локального гравця від першої особи
+	// (індекси кісток голови, знайдені один раз для поточної моделі)
+	std::vector<u32> m_fp_head_joints;
+	std::vector<v3f> m_fp_head_saved_scale;
+	bool m_fp_head_scanned = false;
+	bool m_fp_head_hidden = false;
+	void updateFirstPersonHead();
+
 	// Attachments
 	object_t m_attachment_parent_id = 0;
 	std::unordered_set<object_t> m_attachment_child_ids;
