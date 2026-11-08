@@ -282,6 +282,10 @@ function human_fortress.update_player_model(player)
         if e then texlist[1] = ws47_skins.texture_for_level(e, level) end
     end
 
+    -- запам'ятовуємо справжній вигляд (для превʼю в меню слів тощо)
+    human_fortress.player_look = human_fortress.player_look or {}
+    human_fortress.player_look[name] = {mesh = mesh, textures = texlist}
+
     local vsize = {x = m[5], y = m[5], z = m[5]}
     local use_avatar = PS[name] ~= nil and avatar_wanted(player)
     local hidden = cmd_hidden(player)

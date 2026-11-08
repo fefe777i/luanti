@@ -151,6 +151,7 @@ dofile(path .. "/features.lua")
 dofile(path .. "/world.lua")
 dofile(path .. "/upgrades.lua")
 dofile(path .. "/words.lua")
+dofile(path .. "/words_menu.lua")
 dofile(path .. "/jackals.lua")
 dofile(path .. "/minigame.lua")
 -- ============================================
@@ -721,3 +722,4 @@ print("[Human Fortress RTS] Усі компоненти завантажено!"
 dofile(path .. "/spawn_fork.lua")
 dofile(path .. "/protection.lua")
 dofile(path .. "/mirror.lua")
+dofile(path .. "/world_props.lua")
