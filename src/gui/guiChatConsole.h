@@ -78,20 +78,6 @@ private:
 	void drawText();
 	void drawPrompt();
 
-	// Buttons of the tool row (below the input line in the classic console,
-	// above it in the modern window). Useful on touch devices that lack keys.
-	enum Tool {
-		TOOL_SLASH,  // types "/" (classic console only, modern has its own)
-		TOOL_TAB,    // completes the command or nick, like the Tab key
-		TOOL_UP,     // previous command from the history
-		TOOL_DOWN,   // next command from the history
-		TOOL_COPY,   // copies the selection, or the whole input line
-		TOOL_PASTE,  // pastes the clipboard at the cursor
-		TOOL_CLEAR,  // clears the input line
-		TOOL_WIPE,   // clears the chat history
-		TOOL_COUNT
-	};
-
 	// If clicked fragment has a web url, send it to the system default web browser.
 	// Returns true if, and only if a web url was pressed.
 	// Layout of the console, in screen pixels. The modern window is a rounded
@@ -113,34 +99,21 @@ private:
 		core::recti input;
 		core::recti send_btn;
 		core::recti scroll_btn; // "scroll to newest", empty if not shown
-		core::recti tools;      // row of tool buttons
-		core::recti tool_btn[TOOL_COUNT]; // empty if a button is not shown
 	};
 	Layout getLayout() const;
 	void drawRoundRect(const core::recti &r, s32 radius, video::SColor color) const;
 	void drawModernHeader(const Layout &l);
 	void drawScrollButton(const Layout &l);
-	// Buttons of the window, returns true if one was hit
-	bool buttonClick(s32 x, s32 y);
-	void sendPrompt();
-
-	void layoutTools(Layout &l) const;
-	void drawTools(const Layout &l);
-	// Runs the action of a tool button
-	void runTool(Tool tool);
-	// Tab / Shift+Tab: complete the command name or a player name
-	void completeTab(bool backwards);
-	// Copy the selection (or the whole line) / paste at the cursor
-	void copyPrompt();
-	void pastePrompt();
-	// Height of the tool row in pixels
-	s32 toolsHeight() const { return 2 * (s32)m_fontsize.Y; }
 	// Puts the cursor of the input line under a screen position.
 	// text_x is where the first visible character of the line is drawn.
 	void placePromptCursor(s32 x, s32 text_x);
 	// Where the input line is drawn: its frame and the x of its first character
 	core::recti promptFrame(const Layout &l) const;
 	s32 promptTextX(const Layout &l) const;
+
+	// Buttons of the modern window, returns true if one was hit
+	bool buttonClick(s32 x, s32 y);
+	void sendPrompt();
 
 	bool m_modern = true;
 	// Touch devices without keyboard: the chat window fills the screen and

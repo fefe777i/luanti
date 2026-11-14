@@ -1641,7 +1641,8 @@ void Game::openConsole(float scale, const wchar_t *line)
 
 #ifdef __ANDROID__
 	if (!porting::hasPhysicalKeyboardAndroid()) {
-		if (!g_settings->getBool("chat_modern_ui")) {
+		if (!g_settings->getBool("chat_modern_ui") &&
+				!g_settings->getBool("chat_multicraft_ui")) {
 			// Classic behavior: system text input dialog
 			porting::showTextInputDialog("", "", 2);
 			m_android_chat_open = true;
