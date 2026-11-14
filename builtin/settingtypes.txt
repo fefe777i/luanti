@@ -983,7 +983,7 @@ console_alpha (Console alpha) int 200 0 255
 
 # Modern chat window: header, message times, input field with send button.
 # If disabled, the classic console is used.
-chat_modern_ui (Modern chat window) bool false
+chat_modern_ui (Modern chat window) bool true
 
 # Height of the chat window (fraction of the screen) while the on-screen
 # keyboard is shown. Make it smaller if the keyboard covers the input field.
