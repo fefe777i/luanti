@@ -281,11 +281,12 @@ void GUIChatConsole::reformatConsole()
 		const s32 fh = m_fontsize.Y, fw = m_fontsize.X;
 		const s32 m = fh / 2, pad = fh / 2;
 		// panel without header and footer, and without the column of times
-		rows = ((s32)m_desired_height - 2 * m - 4 * fh) / fh;
+		rows = ((s32)m_desired_height - 2 * m - 4 * fh - toolsHeight()) / fh;
 		cols = ((s32)m_screensize.X - 2 * m - 3 * pad - 8 * fw) / fw;
 	} else {
 		cols = m_screensize.X / m_fontsize.X - 2; // make room for a margin (looks better)
-		rows = m_desired_height / m_fontsize.Y - 1; // make room for the input prompt
+		// make room for the input prompt and the row of tool buttons
+		rows = (s32)(m_desired_height / m_fontsize.Y) - 1 - toolsHeight() / (s32)m_fontsize.Y;
 	}
 	if (cols <= 0 || rows <= 0)
 		cols = rows = 0;
@@ -300,6 +301,28 @@ void GUIChatConsole::reformatConsole()
 		Layout l = getLayout();
 		s32 icols = (l.input.getWidth() - m_fontsize.Y) / (s32)m_fontsize.X;
 		m_chat_backend->getPrompt().reformat(std::max<s32>(icols, 0) + 1);
+	}
+}
+
+// Spreads the tool buttons evenly over the tool row
+void GUIChatConsole::layoutTools(Layout &l) const
+{
+	const s32 fh = m_fontsize.Y;
+	const s32 gap = std::max<s32>(2, fh / 4);
+	int shown[TOOL_COUNT];
+	int n = 0;
+	for (int i = 0; i < TOOL_COUNT; i++) {
+		// the modern window has its own "/" button next to the input field
+		if (i == TOOL_SLASH && m_modern)
+			continue;
+		shown[n++] = i;
+	}
+	const s32 bw = (l.tools.getWidth() - (n + 1) * gap) / std::max(n, 1);
+	const s32 top = l.tools.UpperLeftCorner.Y + fh / 4;
+	const s32 bottom = l.tools.LowerRightCorner.Y - fh / 4;
+	for (int k = 0; k < n; k++) {
+		const s32 x = l.tools.UpperLeftCorner.X + gap + k * (bw + gap);
+		l.tool_btn[shown[k]] = core::recti(x, top, x + bw, bottom);
 	}
 }
 
@@ -319,6 +342,11 @@ GUIChatConsole::Layout GUIChatConsole::getLayout() const
 		l.footer = core::recti(0, l.text.LowerRightCorner.Y, W,
 				l.text.LowerRightCorner.Y + fh);
 		l.input = l.footer;
+		// Tool buttons under the input line (not under the scrollbar)
+		l.tools = core::recti(0, l.footer.LowerRightCorner.Y,
+				W - (s32)getScrollbarSize(Environment),
+				l.footer.LowerRightCorner.Y + toolsHeight());
+		layoutTools(l);
 		return l;
 	}
 
@@ -349,6 +377,10 @@ GUIChatConsole::Layout GUIChatConsole::getLayout() const
 	l.send_btn = core::recti(right - p2 - ih, iy, right - p2, iy + ih);
 	l.input = core::recti(l.slash_btn.LowerRightCorner.X + p2, iy,
 			l.send_btn.UpperLeftCorner.X - p2, iy + ih);
+	// Tool buttons just above the input field
+	l.tools = core::recti(left, l.footer.UpperLeftCorner.Y - toolsHeight(), right,
+			l.footer.UpperLeftCorner.Y);
+	layoutTools(l);
 
 	// "scroll to newest" while looking at older messages
 	const ChatBuffer &buf = m_chat_backend->getConsoleBuffer();
@@ -442,6 +474,205 @@ void GUIChatConsole::drawScrollButton(const Layout &l)
 	}
 }
 
+core::recti GUIChatConsole::promptFrame(const Layout &l) const
+{
+	return l.input;
+}
+
+// The x where the first visible character of the line is drawn. The classic
+// console draws the prompt character too, the modern window leaves it out.
+s32 GUIChatConsole::promptTextX(const Layout &l) const
+{
+	if (m_modern)
+		return l.input.UpperLeftCorner.X + (s32)m_fontsize.Y / 2;
+	return (s32)m_fontsize.X;
+}
+
+void GUIChatConsole::placePromptCursor(s32 x, s32 text_x)
+{
+	if (!m_font)
+		return;
+	ChatPrompt &prompt = m_chat_backend->getPrompt();
+	std::wstring shown = prompt.getVisiblePortion();
+	// getVisiblePortion() starts with the prompt character, which only the
+	// classic console draws
+	s32 skip = 1;
+	if (!m_modern)
+		skip = 0;
+	if (skip > 0 && !shown.empty())
+		shown.erase(0, skip);
+
+	// Character under the finger, the closer side of it
+	const s32 px = x - text_x;
+	s32 idx = m_font->getCharacterFromPos(shown.c_str(), px);
+	if (px <= 0) {
+		idx = 0;
+	} else if (idx < 0 || idx >= (s32)shown.size()) {
+		idx = shown.size();
+	} else {
+		// on the right half of a character the cursor goes behind it
+		const s32 left = m_font->getDimension(shown.substr(0, idx).c_str()).Width;
+		const s32 right = m_font->getDimension(shown.substr(0, idx + 1).c_str()).Width;
+		if (px > (left + right) / 2)
+			idx++;
+	}
+	if (!m_modern) {
+		// prompt character is part of the drawn text, not of the line
+		idx = std::max<s32>(idx - 1, 0);
+	}
+	prompt.setCursorPos(prompt.getViewPosition() + idx);
+	m_cursor_blink = 0x8000; // show the cursor right away
+}
+
+void GUIChatConsole::completeTab(bool backwards)
+{
+	// Command name completion after "/"
+	if (completeCommand())
+		return;
+	// Nick completion
+	auto names = m_client->getConnectedPlayerNames();
+	m_chat_backend->getPrompt().nickCompletion(names, backwards);
+}
+
+void GUIChatConsole::copyPrompt()
+{
+	ChatPrompt &prompt = m_chat_backend->getPrompt();
+	// The selection, or the whole line if nothing is selected
+	std::wstring text = prompt.getCursorLength() > 0 ?
+			prompt.getSelection() : prompt.getLine();
+	if (text.empty())
+		return;
+	Environment->getOSOperator()->copyToClipboard(wide_to_utf8(text).c_str());
+	m_copied_until = porting::getTimeMs() + 1500;
+}
+
+void GUIChatConsole::pastePrompt()
+{
+	ChatPrompt &prompt = m_chat_backend->getPrompt();
+	const c8 *text = Environment->getOSOperator()->getTextFromClipboard();
+	if (!text || !*text)
+		return;
+	if (prompt.getCursorLength() > 0) {
+		// Replace the selected section of text
+		prompt.cursorOperation(
+			ChatPrompt::CURSOROP_DELETE,
+			ChatPrompt::CURSOROP_DIR_LEFT, // Ignored
+			ChatPrompt::CURSOROP_SCOPE_SELECTION);
+	}
+	// The input line has a single row
+	std::wstring wtext = utf8_to_wide(text);
+	for (wchar_t &c : wtext)
+		if (c == L'\n' || c == L'\r' || c == L'\t')
+			c = L' ';
+	prompt.input(wtext);
+}
+
+void GUIChatConsole::runTool(Tool tool)
+{
+	ChatPrompt &prompt = m_chat_backend->getPrompt();
+	switch (tool) {
+	case TOOL_SLASH:
+		prompt.input(L'/');
+		break;
+	case TOOL_TAB:
+		completeTab(false);
+		break;
+	case TOOL_UP:
+		prompt.historyPrev();
+		break;
+	case TOOL_DOWN:
+		prompt.historyNext();
+		break;
+	case TOOL_COPY:
+		copyPrompt();
+		break;
+	case TOOL_PASTE:
+		pastePrompt();
+		break;
+	case TOOL_CLEAR:
+		prompt.replace(L"");
+		break;
+	case TOOL_WIPE:
+		m_chat_backend->clearAllChat();
+		m_unseen = 0;
+		clearSelection();
+		updateScrollbar();
+		break;
+	default:
+		break;
+	}
+	m_cursor_blink = 0x8000;
+}
+
+void GUIChatConsole::drawTools(const Layout &l)
+{
+	if (!m_font)
+		return;
+	video::IVideoDriver *driver = Environment->getVideoDriver();
+	const video::SColor white(255, 255, 255, 255);
+	const video::SColor face(255, 52, 54, 64);
+	const bool copied = porting::getTimeMs() < m_copied_until;
+
+	for (int i = 0; i < TOOL_COUNT; i++) {
+		const core::recti &r = l.tool_btn[i];
+		if (r.getWidth() <= 0)
+			continue;
+		drawRoundRect(r, r.getHeight() / 4, face);
+
+		const s32 cx = (r.UpperLeftCorner.X + r.LowerRightCorner.X) / 2;
+		const s32 cy = (r.UpperLeftCorner.Y + r.LowerRightCorner.Y) / 2;
+		const s32 s = std::max<s32>(3, r.getHeight() / 5); // arrow half size
+		const core::recti *clip = &AbsoluteClippingRect;
+
+		switch (i) {
+		case TOOL_UP:
+			// filled triangle pointing up
+			for (s32 k = 0; k <= 2 * s; k++) {
+				const s32 hw = (s * k) / (2 * s);
+				driver->draw2DRectangle(white, core::recti(cx - hw, cy - s + k,
+						cx + hw + 1, cy - s + k + 1), clip);
+			}
+			break;
+		case TOOL_DOWN:
+			// filled triangle pointing down
+			for (s32 k = 0; k <= 2 * s; k++) {
+				const s32 hw = (s * k) / (2 * s);
+				driver->draw2DRectangle(white, core::recti(cx - hw, cy + s - k,
+						cx + hw + 1, cy + s - k + 1), clip);
+			}
+			break;
+		case TOOL_WIPE: {
+			// trash can: lid, handle and body
+			const s32 t = std::max<s32>(2, s / 3);
+			driver->draw2DRectangle(white, core::recti(cx - s - t, cy - s, cx + s + t,
+					cy - s + t), clip);
+			driver->draw2DRectangle(white, core::recti(cx - s / 2, cy - s - t, cx + s / 2,
+					cy - s), clip);
+			driver->draw2DRectangle(white, core::recti(cx - s, cy - s + t, cx - s + t,
+					cy + s + t), clip);
+			driver->draw2DRectangle(white, core::recti(cx + s - t, cy - s + t, cx + s,
+					cy + s + t), clip);
+			driver->draw2DRectangle(white, core::recti(cx - s, cy + s, cx + s,
+					cy + s + t), clip);
+			break;
+		}
+		default: {
+			std::wstring label;
+			switch (i) {
+			case TOOL_SLASH: label = L"/"; break;
+			case TOOL_TAB:   label = L"Tab"; break;
+			case TOOL_COPY:  label = copied ? wstrgettext("Copied") : wstrgettext("Copy"); break;
+			case TOOL_PASTE: label = wstrgettext("Paste"); break;
+			case TOOL_CLEAR: label = wstrgettext("Clear"); break;
+			}
+			core::recti tr = r;
+			m_font->draw(label.c_str(), tr, white, true, true, &tr);
+			break;
+		}
+		}
+	}
+}
+
 void GUIChatConsole::sendPrompt()
 {
 	ChatPrompt &prompt = m_chat_backend->getPrompt();
@@ -456,10 +687,21 @@ void GUIChatConsole::sendPrompt()
 
 bool GUIChatConsole::buttonClick(s32 x, s32 y)
 {
-	if (!m_modern)
-		return false;
 	const Layout l = getLayout();
 	const core::vector2di p(x, y);
+
+	for (int i = 0; i < TOOL_COUNT; i++) {
+		if (l.tool_btn[i].getWidth() > 0 && l.tool_btn[i].isPointInside(p)) {
+			runTool((Tool)i);
+			// keep the keyboard open for the next key
+			if (m_soft_keyboard_mode)
+				setKeyboardActive(true);
+			return true;
+		}
+	}
+
+	if (!m_modern)
+		return false;
 
 	if (l.close_btn.isPointInside(p)) {
 		closeConsoleAtOnce();
@@ -776,6 +1018,7 @@ void GUIChatConsole::drawPrompt()
 			}
 		}
 
+		drawTools(l);
 		drawCommandSuggestions(l.footer.UpperLeftCorner.Y, fh);
 		return;
 	}
@@ -828,6 +1071,7 @@ void GUIChatConsole::drawPrompt()
 		}
 	}
 
+	drawTools(getLayout());
 	drawCommandSuggestions(y, font_height);
 }
 
@@ -1059,11 +1303,19 @@ bool GUIChatConsole::pointerDown(s32 x, s32 y, bool touch)
 	if (commandSuggestionClick(x, y))
 		return true;
 
-	// Tap on the input field: (re)start the keyboard when released
-	if (m_soft_keyboard_mode && getLayout().input.isPointInside(core::vector2di(x, y))) {
-		m_ime_active = false; // stop text input, so it can be started again
-		m_input_pressed = true;
-		return true;
+	// Tap or click on the input line: put the cursor under the finger, so a
+	// typo at the start of the line can be fixed without retyping
+	{
+		const Layout l = getLayout();
+		if (promptFrame(l).isPointInside(core::vector2di(x, y))) {
+			placePromptCursor(x, promptTextX(l));
+			// (re)start the keyboard when released
+			if (m_soft_keyboard_mode) {
+				m_ime_active = false; // stop text input, so it can be started again
+				m_input_pressed = true;
+			}
+			return true;
+		}
 	}
 
 	if (!inTextArea(x, y))
@@ -1400,13 +1652,7 @@ bool GUIChatConsole::OnEvent(const SEvent& event)
 		else if(event.KeyInput.Key == KEY_TAB)
 		{
 			// Tab or Shift-Tab pressed
-			// Command name completion after "/"
-			if (completeCommand())
-				return true;
-			// Nick completion
-			auto names = m_client->getConnectedPlayerNames();
-			bool backwards = event.KeyInput.Shift;
-			prompt.nickCompletion(names, backwards);
+			completeTab(event.KeyInput.Shift);
 			return true;
 		}
 

@@ -179,9 +179,14 @@ public:
 
 	void drawNametags();
 
+	// Player toggle (button / key): nametags are not drawn when switched off
+	void setShowNametags(bool show) { m_show_nametags = show; }
+
 	inline void addArmInertia(f32 player_yaw);
 
 private:
+	bool m_show_nametags = true;
+
 	// Use getFrustumCuller().
 	// This helper just exists to decrease the header's number of includes.
 	std::array<core::plane3d<f32>, 4> getFrustumCullPlanes() const;

@@ -63,6 +63,13 @@ void TouchControls::buttonEmitAction(button_info &btn, bool action)
 		return;
 	}
 
+	if (btn.id == hud_id) {
+		// Hide the interface; a double tap on the screen shows it again
+		if (action)
+			setInterfaceHidden(true);
+		return;
+	}
+
 	if (!btn.game_key)
 		return;
 
@@ -194,6 +201,10 @@ static GameKeyType id_to_action(touch_gui_button_id id)
 			return KeyType::INVENTORY;
 		case drop_id:
 			return KeyType::DROP;
+		case tab_id:
+			return KeyType::TABB;
+		case nametags_id:
+			return KeyType::TOGGLE_NAMETAGS;
 		default:
 			return KeyType::INTERNAL_ENUM_COUNT;
 	}
@@ -402,7 +413,8 @@ bool TouchControls::mayAddButton(touch_gui_button_id id)
 	assert(ButtonLayout::isButtonValid(id));
 	assert(ButtonLayout::isButtonAllowed(id));
 	// The overflow button doesn't need a keycode to be valid.
-	return id == overflow_id || id_to_action(id) < KeyType::INTERNAL_ENUM_COUNT;
+	return id == overflow_id || id == hud_id ||
+			id_to_action(id) < KeyType::INTERNAL_ENUM_COUNT;
 }
 
 void TouchControls::addButton(std::vector<button_info> &buttons, touch_gui_button_id id,
@@ -588,6 +600,19 @@ void TouchControls::translateEvent(const SEvent &event)
 		m_pointer_pos[pointer_id] = touch_pos;
 
 		bool prevent_short_tap = false;
+
+		// Interface hidden: a double tap anywhere shows it again
+		if (m_interface_hidden) {
+			const u64 now = porting::getTimeMs();
+			const s32 slop = m_button_size;
+			if (m_last_tap_time != 0 && now - m_last_tap_time < 400 &&
+					m_last_tap_pos.getDistanceFromSQ(touch_pos) < (u32)(slop * slop)) {
+				setInterfaceHidden(false);
+				return;
+			}
+			m_last_tap_time = now;
+			m_last_tap_pos = touch_pos;
+		}
 
 		// RTS toolbar: big buttons at the bottom of the screen
 		if (m_rts_mode) {
@@ -1076,6 +1101,28 @@ void TouchControls::setVisible(bool visible)
 	updateVisibility();
 }
 
+void TouchControls::setInterfaceHidden(bool hidden)
+{
+	if (m_interface_hidden == hidden)
+		return;
+
+	m_interface_hidden = hidden;
+	if (hidden)
+		m_overflow_open = false;
+	m_last_tap_time = 0;
+	m_interface_hidden_changed = hidden;
+	m_interface_hidden_pending = true;
+	updateVisibility();
+}
+
+std::optional<bool> TouchControls::takeInterfaceHidden()
+{
+	if (!m_interface_hidden_pending)
+		return std::nullopt;
+	m_interface_hidden_pending = false;
+	return m_interface_hidden_changed;
+}
+
 void TouchControls::toggleOverflowMenu()
 {
 	// no releaseAll here so that you can e.g. continue holding the joystick
@@ -1086,7 +1133,8 @@ void TouchControls::toggleOverflowMenu()
 
 void TouchControls::updateVisibility()
 {
-	bool regular_visible = m_visible && !m_overflow_open && !m_rts_mode;
+	bool regular_visible = m_visible && !m_overflow_open && !m_rts_mode &&
+			!m_interface_hidden;
 	for (auto &button : m_buttons)
 		button.gui_button->setVisible(regular_visible);
 	m_overflow_btn->setVisible(regular_visible);
@@ -1095,7 +1143,8 @@ void TouchControls::updateVisibility()
 	m_joystick_btn_bg->setVisible(regular_visible && m_has_joystick_id);
 	m_joystick_btn_center->setVisible(regular_visible && m_has_joystick_id);
 
-	bool overflow_visible = m_visible && m_overflow_open && !m_rts_mode;
+	bool overflow_visible = m_visible && m_overflow_open && !m_rts_mode &&
+			!m_interface_hidden;
 	m_overflow_bg->setVisible(overflow_visible);
 	for (auto &button : m_overflow_buttons)
 		button.gui_button->setVisible(overflow_visible);

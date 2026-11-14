@@ -1404,6 +1404,14 @@ void Game::processUserInput(f32 dtime)
 			 * what we want in case we just did clear them */
 			g_touchcontrols->show();
 			g_touchcontrols->step(dtime);
+
+			// "Hide interface" button / double tap: hide or show the HUD as well
+			if (std::optional<bool> hidden = g_touchcontrols->takeInterfaceHidden()) {
+				if (*hidden == m_game_ui->getFlags().show_hud)
+					m_game_ui->toggleHud();
+				if (*hidden)
+					m_game_ui->showTranslatedStatusText("Double-tap to show interface");
+			}
 		}
 
 		m_game_focused = true;
@@ -1539,6 +1547,12 @@ void Game::processKeyInput()
 		toggleFullViewRange();
 	} else if (wasKeyDown(KeyType::ZOOM)) {
 		checkZoomEnabled();
+	} else if (wasKeyPressed(KeyType::TOGGLE_NAMETAGS)) {
+		m_game_ui->toggleNametags();
+		camera->setShowNametags(m_game_ui->getFlags().show_nametags);
+	} else if (wasKeyDown(KeyType::TABB)) {
+		if (client->modsLoaded())
+			client->getScript()->on_tab();
 	} else if (wasKeyDown(KeyType::QUICKTUNE_NEXT)) {
 		quicktune->next();
 	} else if (wasKeyDown(KeyType::QUICKTUNE_PREV)) {
@@ -2270,7 +2284,8 @@ void Game::updatePlayerControl(const CameraOrientation &cam)
 		isKeyDown(KeyType::DIG),
 		isKeyDown(KeyType::PLACE),
 		cam.camera_pitch,
-		cam.camera_yaw
+		cam.camera_yaw,
+		isKeyDown(KeyType::TABB)
 	);
 	control.setMovementFromKeys();
 

@@ -58,6 +58,11 @@ enum touch_gui_button_id : u8
 	voice_id, // voice chat push-to-talk
 	voice_menu_id,
 
+	// like in MultiCraft
+	tab_id,        // the "Tab" key (player list etc. in games/mods)
+	nametags_id,   // show / hide nicknames above players
+	hud_id,        // hide the whole interface, double tap shows it again
+
 	// the joystick
 	joystick_off_id,
 	joystick_bg_id,

@@ -179,6 +179,8 @@ void set_default_settings()
 	settings->setDefault("keymap_cinematic", "");
 	settings->setDefault("keymap_toggle_block_bounds", "");
 	settings->setDefault("keymap_toggle_hud", "SYSTEM_SCANCODE_58"); // KEY_F1
+	settings->setDefault("keymap_toggle_nametags", "SYSTEM_SCANCODE_64"); // KEY_F7
+	settings->setDefault("keymap_tabb", "SYSTEM_SCANCODE_43"); // KEY_TAB
 	settings->setDefault("keymap_toggle_chat", "SYSTEM_SCANCODE_59"); // KEY_F2
 	settings->setDefault("keymap_toggle_fog", "SYSTEM_SCANCODE_60"); // KEY_F3
 #ifndef NDEBUG
@@ -301,7 +303,7 @@ void set_default_settings()
 	settings->setDefault("console_height", "0.6");
 	settings->setDefault("console_color", "(0,0,0)");
 	settings->setDefault("console_alpha", "200");
-	settings->setDefault("chat_modern_ui", "true");
+	settings->setDefault("chat_modern_ui", "false");
 	settings->setDefault("chat_keyboard_height", "0.33");
 	settings->setDefault("formspec_fullscreen_bg_color", "(0,0,0)");
 	settings->setDefault("formspec_fullscreen_bg_opacity", "140");

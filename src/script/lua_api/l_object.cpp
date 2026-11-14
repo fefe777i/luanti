@@ -1945,6 +1945,8 @@ int ObjectRef::l_get_player_control(lua_State *L)
 	lua_setfield(L, -2, "RMB");
 	lua_pushboolean(L, control.zoom);
 	lua_setfield(L, -2, "zoom");
+	lua_pushboolean(L, control.tabb);
+	lua_setfield(L, -2, "tabb");
 	return 1;
 }
 
@@ -1973,7 +1975,8 @@ int ObjectRef::l_get_player_control_bits(lua_State *L)
 		( (u32)(c.sneak & 1) << 6) |
 		( (u32)(c.dig   & 1) << 7) |
 		( (u32)(c.place & 1) << 8) |
-		( (u32)(c.zoom  & 1) << 9)
+		( (u32)(c.zoom  & 1) << 9) |
+		( (u32)(c.tabb  & 1) << 10)
 	;
 
 	lua_pushinteger(L, keypress_bits);

@@ -748,6 +748,17 @@ void ChatPrompt::cursorOperation(CursorOp op, CursorOpDir dir, CursorOpScope sco
 	m_nick_completion_end = 0;
 }
 
+void ChatPrompt::setCursorPos(s32 pos)
+{
+	const s32 length = getLineRef().size();
+	m_cursor = MYMAX(MYMIN(pos, length), 0);
+	m_cursor_len = 0;
+	clampView();
+
+	m_nick_completion_start = 0;
+	m_nick_completion_end = 0;
+}
+
 void ChatPrompt::clampView()
 {
 	s32 length = getLineRef().size();
@@ -855,6 +866,12 @@ void ChatBackend::reformat(u32 cols, u32 rows)
 
 void ChatBackend::clearRecentChat()
 {
+	m_recent_buffer.clear();
+}
+
+void ChatBackend::clearAllChat()
+{
+	m_console_buffer.clear();
 	m_recent_buffer.clear();
 }
 

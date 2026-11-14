@@ -62,6 +62,8 @@ public:
 		DECREASE_VIEWING_RANGE,
 		RANGESELECT,
 		ZOOM,
+		TABB,            // "Tab" game key, also a touch button
+		TOGGLE_NAMETAGS,
 
 		QUICKTUNE_NEXT,
 		QUICKTUNE_PREV,

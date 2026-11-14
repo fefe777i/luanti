@@ -172,6 +172,14 @@ public:
 	void registerHotbarRect(u16 index, const recti &rect);
 	std::optional<u16> getHotbarSelection();
 
+	// "Hide interface" button. While hidden, all buttons are invisible and a
+	// double tap shows them again.
+	bool isInterfaceHidden() const { return m_interface_hidden; }
+	void setInterfaceHidden(bool hidden);
+	// Returns the new state once after every change, so the game can hide or
+	// show the HUD as well.
+	std::optional<bool> takeInterfaceHidden();
+
 	void resetTouchableHudRects();
 	void registerTouchableHudRect(const std::string &name, const recti &rect);
 	std::optional<std::string> getTouchedHudElement();
@@ -282,6 +290,12 @@ private:
 	std::shared_ptr<IGUIImage> m_overflow_btn;
 
 	bool m_overflow_open = false;
+
+	bool m_interface_hidden = false;
+	bool m_interface_hidden_changed = false;
+	bool m_interface_hidden_pending = false;
+	u64 m_last_tap_time = 0;
+	v2s32 m_last_tap_pos;
 	std::shared_ptr<IGUIStaticText> m_overflow_bg;
 	std::vector<button_info> m_overflow_buttons;
 	std::vector<std::shared_ptr<IGUIStaticText>> m_overflow_button_titles;

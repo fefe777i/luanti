@@ -94,6 +94,21 @@ void ScriptApiClient::on_damage_taken(int32_t damage_amount)
 	}
 }
 
+void ScriptApiClient::on_tab()
+{
+	SCRIPTAPI_PRECHECKHEADER
+
+	// Get core.registered_on_tab
+	lua_getglobal(L, "core");
+	lua_getfield(L, -1, "registered_on_tab");
+	// Call callbacks
+	try {
+		runCallbacks(0, RUN_CALLBACKS_MODE_FIRST);
+	} catch (LuaError &e) {
+		getClient()->setFatalError(e);
+	}
+}
+
 void ScriptApiClient::on_hp_modification(int32_t newhp)
 {
 	SCRIPTAPI_PRECHECKHEADER

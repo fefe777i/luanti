@@ -246,6 +246,10 @@ keymap_drop (Drop item) key SYSTEM_SCANCODE_20|GAMEPAD_BUTTON_12
 
 keymap_zoom (Zoom) key SYSTEM_SCANCODE_29|GAMEPAD_BUTTON_11
 
+keymap_tabb (Tab key) key SYSTEM_SCANCODE_43
+
+keymap_toggle_nametags (Toggle nametags) key SYSTEM_SCANCODE_64
+
 keymap_camera_yaw_left (Look left) key GAMEPAD_AXIS_MINUS_2
 keymap_camera_yaw_right (Look right) key GAMEPAD_AXIS_PLUS_2
 keymap_camera_pitch_up (Look up) key GAMEPAD_AXIS_MINUS_3
@@ -979,7 +983,7 @@ console_alpha (Console alpha) int 200 0 255
 
 # Modern chat window: header, message times, input field with send button.
 # If disabled, the classic console is used.
-chat_modern_ui (Modern chat window) bool true
+chat_modern_ui (Modern chat window) bool false
 
 # Height of the chat window (fraction of the screen) while the on-screen
 # keyboard is shown. Make it smaller if the keyboard covers the input field.

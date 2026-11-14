@@ -194,6 +194,13 @@ public:
 	s32 getVisibleCursorPosition() const;
 	// Get length of cursor selection
 	s32 getCursorLength() const { return m_cursor_len; }
+	// Get cursor position (index into the line)
+	s32 getCursorPos() const { return m_cursor; }
+	// Get start of the visible portion (index into the line)
+	s32 getViewPosition() const { return m_view; }
+	// Move the cursor to the given index into the line (clamped) and drop the
+	// selection. Used when the input field is tapped or clicked.
+	void setCursorPos(s32 pos);
 
 	// Cursor operations
 	enum CursorOp {
@@ -300,6 +307,9 @@ public:
 
 	// Clear all recent messages
 	void clearRecentChat();
+
+	// Clear all chat messages (console history and recent messages)
+	void clearAllChat();
 
 	// Age recent messages
 	void step(float dtime);

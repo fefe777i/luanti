@@ -656,6 +656,9 @@ void Camera::toggleCameraMode()
 
 void Camera::drawNametags()
 {
+	if (!m_show_nametags)
+		return;
+
 	core::matrix4 trans = m_cameranode->getProjectionMatrix();
 	trans *= m_cameranode->getViewMatrix();
 

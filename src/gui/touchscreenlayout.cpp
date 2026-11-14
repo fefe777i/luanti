@@ -47,6 +47,9 @@ const char *button_names[] = {
 	"toggle_chat",
 	"voice",
 	"voice_menu",
+	"tabb",
+	"toggle_nametags",
+	"toggle_interface",
 
 	"joystick_off",
 	"joystick_bg",
@@ -79,6 +82,9 @@ const char *button_titles[] = {
 	N_("Toggle chat log"),
 	N_("Voice chat (tap to talk)"),
 	N_("Voice chat menu"),
+	N_("Tab"),
+	N_("Toggle nametags"),
+	N_("Hide interface"),
 
 	N_("Joystick"),
 	N_("Joystick"),
@@ -111,6 +117,9 @@ const char *button_image_names[] = {
 	"chat_hide_btn.png",
 	"voice_btn.png",
 	"voice_menu_btn.png",
+	"tab_btn.png",
+	"names_hide_btn.png",
+	"hide_interface.png",
 
 	"joystick_off.png",
 	"joystick_bg.png",
@@ -202,6 +211,22 @@ const ButtonLayout::ButtonMap ButtonLayout::default_data {
 	{overflow_id, {
 		v2f(1.0f, 1.0f),
 		v2f(-0.75f, -5.0f),
+	}},
+	{chat_id, {
+		v2f(0.0f, 1.0f),
+		v2f(0.75f, -5.0f),
+	}},
+	{inventory_id, {
+		v2f(0.0f, 1.0f),
+		v2f(2.0f, -5.0f),
+	}},
+	{drop_id, {
+		v2f(0.0f, 1.0f),
+		v2f(3.25f, -5.0f),
+	}},
+	{tab_id, {
+		v2f(0.0f, 1.0f),
+		v2f(4.6f, -5.0f),
 	}},
 };
 

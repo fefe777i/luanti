@@ -33,6 +33,7 @@ public:
 
 	void on_damage_taken(int32_t damage_amount);
 	void on_hp_modification(int32_t newhp);
+	void on_tab();
 	void environment_step(float dtime);
 
 	bool on_dignode(v3s16 p, MapNode node);

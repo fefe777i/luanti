@@ -43,6 +43,7 @@ public:
 	{
 		bool show_chat = true;
 		bool show_hud = true;
+		bool show_nametags = true;
 		bool show_minimal_debug = false;
 		bool show_basic_debug = false;
 		bool show_profiler_graph = false;
@@ -83,6 +84,7 @@ public:
 
 	void toggleChat(Client *client);
 	void toggleHud();
+	void toggleNametags();
 	void toggleProfiler();
 
 	void clearText();

@@ -82,6 +82,8 @@ void MyEventReceiver::reloadKeybindings()
 			getKeySetting("keymap_decrease_viewing_range_min");
 	keybindings[KeyType::RANGESELECT] = getKeySetting("keymap_rangeselect");
 	keybindings[KeyType::ZOOM] = getKeySetting("keymap_zoom");
+	keybindings[KeyType::TABB] = getKeySetting("keymap_tabb");
+	keybindings[KeyType::TOGGLE_NAMETAGS] = getKeySetting("keymap_toggle_nametags");
 
 	keybindings[KeyType::CAMERA_YAW_LEFT] = getKeySetting("keymap_camera_yaw_left");
 	keybindings[KeyType::CAMERA_YAW_RIGHT] = getKeySetting("keymap_camera_yaw_right");

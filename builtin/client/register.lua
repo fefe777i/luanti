@@ -10,6 +10,7 @@ core.registered_on_sending_chat_message, core.register_on_sending_chat_message =
 core.registered_on_chatcommand, core.register_on_chatcommand = make_registration()
 core.registered_on_death, core.register_on_death = make_registration()
 core.registered_on_hp_modification, core.register_on_hp_modification = make_registration()
+core.registered_on_tab, core.register_on_tab = make_registration()
 core.registered_on_damage_taken, core.register_on_damage_taken = make_registration()
 core.registered_on_formspec_input, core.register_on_formspec_input = make_registration()
 core.registered_on_dignode, core.register_on_dignode = make_registration()
