@@ -183,6 +183,11 @@ s32 ButtonLayout::getButtonSize(v2u32 screensize)
 					g_settings->getFloat("hud_scaling"));
 }
 
+// Default layout, the same as in MultiCraft. Position is a fraction of the
+// screen, offset is in button sizes (the center of the button) and the last
+// number is the size of the button in button sizes.
+// MultiCraft stores the top left corner and the size (tg_<button>_x/y/w/h),
+// so offset = size / 2 here.
 const ButtonLayout::ButtonMap ButtonLayout::default_data {
 	{dig_id, {
 		v2f(1.0f, 1.0f),
@@ -193,40 +198,59 @@ const ButtonLayout::ButtonMap ButtonLayout::default_data {
 		v2f(-2.0f, -4.25f),
 	}},
 	{jump_id, {
-		v2f(1.0f, 1.0f),
-		v2f(-1.0f, -0.5f),
+		v2f(0.796875f, 0.6375f),
+		v2f(0.75f, 0.75f),
+		1.5f,
 	}},
 	{sneak_id, {
 		v2f(1.0f, 1.0f),
-		v2f(-2.5f, -0.5f),
+		v2f(-2.53125f, -0.5625f),
+		1.125f,
 	}},
 	{zoom_id, {
 		v2f(1.0f, 1.0f),
 		v2f(-0.75f, -3.5f),
 	}},
 	{aux1_id, {
-		v2f(1.0f, 1.0f),
-		v2f(-0.75f, -2.0f),
+		v2f(0.891875f, 0.469444f),
+		v2f(0.75f, 0.75f),
+		1.5f,
+	}},
+	// top row in the middle: exit, minimap, camera, menu
+	{exit_id, {
+		v2f(0.5f, 0.0f),
+		v2f(-1.5f, 0.5f),
+	}},
+	{minimap_id, {
+		v2f(0.5f, 0.0f),
+		v2f(-0.5f, 0.5f),
+	}},
+	{camera_id, {
+		v2f(0.5f, 0.0f),
+		v2f(0.5f, 0.5f),
 	}},
 	{overflow_id, {
-		v2f(1.0f, 1.0f),
-		v2f(-0.75f, -5.0f),
+		v2f(0.5f, 0.0f),
+		v2f(1.5f, 0.5f),
 	}},
+	// top right: chat and tab
 	{chat_id, {
-		v2f(0.0f, 1.0f),
-		v2f(0.75f, -5.0f),
-	}},
-	{inventory_id, {
-		v2f(0.0f, 1.0f),
-		v2f(2.0f, -5.0f),
-	}},
-	{drop_id, {
-		v2f(0.0f, 1.0f),
-		v2f(3.25f, -5.0f),
+		v2f(0.925625f, 0.0f),
+		v2f(0.62766f, 0.62766f),
+		1.25532f,
 	}},
 	{tab_id, {
-		v2f(0.0f, 1.0f),
-		v2f(4.6f, -5.0f),
+		v2f(1.0f, 0.0f),
+		v2f(-0.625f, 1.5f),
+	}},
+	{inventory_id, {
+		v2f(0.900625f, 0.779167f),
+		v2f(0.845745f, 0.845745f),
+		1.69149f,
+	}},
+	{drop_id, {
+		v2f(1.0f, 0.5f),
+		v2f(-0.5f, -1.0f),
 	}},
 };
 
@@ -294,7 +318,8 @@ core::recti ButtonLayout::getRect(touch_gui_button_id btn,
 	v2s32 pos = meta.getPos(screensize, button_size);
 
 	v2u32 orig_size = getTexture(btn, tsrc)->getOriginalSize();
-	v2s32 size((button_size * orig_size.X) / orig_size.Y, button_size);
+	const f32 bs = button_size * meta.scale;
+	v2s32 size((s32)((bs * orig_size.X) / orig_size.Y), (s32)bs);
 
 	return core::recti(pos - size / 2, core::dimension2di(size));
 }
@@ -323,6 +348,8 @@ void ButtonLayout::serializeJson(std::ostream &os) const
 			button["position_y"] = meta.position.Y;
 			button["offset_x"] = meta.offset.X;
 			button["offset_y"] = meta.offset.Y;
+			if (meta.scale != 1.0f)
+				button["scale"] = meta.scale;
 
 			root["layout"][button_names[id]] = button;
 		}
@@ -378,6 +405,9 @@ ButtonLayout::ButtonMap ButtonLayout::deserializeJson(std::istream &is)
 			throw Json::RuntimeError("invalid type for offset_x or offset_y in button metadata");
 		meta.offset.X = value["offset_x"].asFloat();
 		meta.offset.Y = value["offset_y"].asFloat();
+
+		if (value["scale"].isNumeric())
+			meta.scale = std::max(0.25f, std::min(value["scale"].asFloat(), 6.0f));
 
 		data.emplace(id, meta);
 	}

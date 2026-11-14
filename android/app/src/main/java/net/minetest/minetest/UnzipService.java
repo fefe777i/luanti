@@ -43,10 +43,10 @@ import java.util.zip.ZipFile;
 import java.util.zip.ZipInputStream;
 
 public class UnzipService extends IntentService {
-	public static final String ACTION_UPDATE = "net.minetest.minetest.UPDATE";
-	public static final String ACTION_PROGRESS = "net.minetest.minetest.PROGRESS";
-	public static final String ACTION_PROGRESS_MESSAGE = "net.minetest.minetest.PROGRESS_MESSAGE";
-	public static final String ACTION_FAILURE = "net.minetest.minetest.FAILURE";
+	public static final String ACTION_UPDATE = "net.workshop47.game.UPDATE";
+	public static final String ACTION_PROGRESS = "net.workshop47.game.PROGRESS";
+	public static final String ACTION_PROGRESS_MESSAGE = "net.workshop47.game.PROGRESS_MESSAGE";
+	public static final String ACTION_FAILURE = "net.workshop47.game.FAILURE";
 	public static final int SUCCESS = -1;
 	public static final int FAILURE = -2;
 	public static final int INDETERMINATE = -3;

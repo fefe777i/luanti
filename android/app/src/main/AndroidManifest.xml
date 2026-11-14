@@ -54,7 +54,7 @@
 
 		<provider
 			android:name="androidx.core.content.FileProvider"
-			android:authorities="net.minetest.minetest.fileprovider"
+			android:authorities="net.workshop47.game.fileprovider"
 			android:grantUriPermissions="true"
 			android:exported="false">
 			<meta-data

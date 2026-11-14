@@ -82,6 +82,9 @@ struct ButtonMeta {
 	// Offset, multiplied by the global button size before it is applied.
 	// Together, position and offset define the position of the button's center.
 	v2f offset;
+	// Size of the button relative to the global button size (MultiCraft
+	// scales every button on its own). 1 = normal size. Optional in the json.
+	f32 scale = 1.0f;
 
 	// Returns the button's effective center position in pixels.
 	v2s32 getPos(v2u32 screensize, s32 button_size) const;
