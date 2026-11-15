@@ -8010,3 +8010,117 @@ msgstr "Не вдалося зберегти скріншот до «%s»"
 #~ "game:<назва>\n"
 #~ "mod:<назва>\n"
 #~ "player:<ім'я>"
+
+msgid "+ Add Skin"
+msgstr "+ Додати скін"
+
+msgid "Character Skin"
+msgstr "Скін персонажа"
+
+msgid "Wear Skin"
+msgstr "Одягнути скін"
+
+msgid "Wearing: "
+msgstr "Одягнено: "
+
+msgid "Connect"
+msgstr "Підключитись"
+
+msgid "Skin"
+msgstr "Скін"
+
+msgid "Copy to clipboard"
+msgstr "Копіювати в буфер обміну"
+
+msgid "Open pause menu"
+msgstr "Відкрити меню паузи"
+
+msgid "Voice chat push-to-talk"
+msgstr "Голосовий чат: говорити по натисканню"
+
+msgid "Voice chat menu"
+msgstr "Меню голосового чату"
+
+msgid "Tab key"
+msgstr "Клавіша Tab"
+
+msgid "Toggle nametags"
+msgstr "Показати/сховати нікнейми"
+
+msgid "Joystick inner dead zone"
+msgstr "Внутрішня мертва зона джойстика"
+
+msgid "Joystick outer dead zone"
+msgstr "Зовнішня мертва зона джойстика"
+
+msgid "Voice chat microphone"
+msgstr "Мікрофон голосового чату"
+
+msgid "Voice chat volume"
+msgstr "Гучність голосового чату"
+
+msgid "Microphone gain"
+msgstr "Підсилення мікрофона"
+
+msgid "Voice activation threshold"
+msgstr "Поріг голосової активації"
+
+msgid "MultiCraft chat"
+msgstr "Чат як у MultiCraft"
+
+msgid "Modern chat window"
+msgstr "Сучасне вікно чату"
+
+msgid "Chat height with keyboard"
+msgstr "Висота чату з клавіатурою"
+
+msgid "Voice chat"
+msgstr "Голосовий чат"
+
+msgid "Voice chat radius"
+msgstr "Радіус голосового чату"
+
+msgid "Emoji font path"
+msgstr "Шлях до шрифту емодзі"
+
+msgid "Texture path"
+msgstr "Шлях до текстур"
+
+msgid "Minimap"
+msgstr "Мінікарта"
+
+msgid "Round minimap"
+msgstr "Кругла мінікарта"
+
+msgid "Remote port"
+msgstr "Віддалений порт"
+
+msgid "Creative"
+msgstr "Творчий режим"
+
+msgid "Player versus player"
+msgstr "Гравець проти гравця"
+
+msgid "Flying"
+msgstr "Політ"
+
+msgid "Pitch move mode"
+msgstr "Режим руху за нахилом"
+
+msgid "Fast movement"
+msgstr "Швидкий рух"
+
+msgid "Noclip"
+msgstr "Прохід крізь блоки"
+
+msgid "Continuous forward"
+msgstr "Постійний рух вперед"
+
+msgid "Cinematic mode"
+msgstr "Кінематографічний режим"
+
+msgid "Hide interface"
+msgstr "Сховати інтерфейс"
+
+msgid "Double-tap to show interface"
+msgstr "Подвійний тап, щоб показати інтерфейс"

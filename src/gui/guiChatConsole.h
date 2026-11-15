@@ -25,6 +25,10 @@ public:
 			IMenuManager* menumgr);
 	~GUIChatConsole() override;
 
+	// Re-reads the chat settings (called when one of them changes)
+	void applySettings();
+	static void settingChangedCallback(const std::string &name, void *data);
+
 	// The console is not a modal menu, so touch events do not reach it through
 	// the GUI environment. The input handler offers them here first.
 	// Returns true if the event was used.

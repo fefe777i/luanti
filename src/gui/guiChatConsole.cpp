@@ -112,6 +112,50 @@ GUIChatConsole::GUIChatConsole(
 	m_scrollbar->setSubElement(true);
 	m_scrollbar->setLargeStep(1);
 	m_scrollbar->setSmallStep(1);
+
+	// Apply changes made in the settings (also from the pause menu) right away
+	for (const char *name : {"chat_multicraft_ui", "chat_modern_ui", "console_alpha",
+			"console_color", "chat_font_size", "clickable_chat_weblinks"})
+		g_settings->registerChangedCallback(name, settingChangedCallback, this);
+}
+
+void GUIChatConsole::settingChangedCallback(const std::string &name, void *data)
+{
+	static_cast<GUIChatConsole *>(data)->applySettings();
+}
+
+// Re-reads the settings that change the look of the chat
+void GUIChatConsole::applySettings()
+{
+	const bool multicraft = g_settings->getBool("chat_multicraft_ui");
+	m_modern = !multicraft && g_settings->getBool("chat_modern_ui");
+#ifdef __ANDROID__
+	if (!m_open) {
+		m_soft_keyboard_mode = (m_modern || multicraft) &&
+				!porting::hasPhysicalKeyboardAndroid();
+		m_ime_active = false;
+	}
+#endif
+
+	m_background_color.setAlpha(clamp_u8(g_settings->getS32("console_alpha")));
+	if (!m_background) {
+		v3f console_color = g_settings->getV3F("console_color").value_or(v3f());
+		m_background_color.setRed(clamp_u8(myround(console_color.X)));
+		m_background_color.setGreen(clamp_u8(myround(console_color.Y)));
+		m_background_color.setBlue(clamp_u8(myround(console_color.Z)));
+	}
+
+	const u16 chat_font_size = g_settings->getU16("chat_font_size");
+	m_font.grab(g_fontengine->getFont(chat_font_size != 0 ?
+		rangelim(chat_font_size, 5, 72) : FONT_SIZE_UNSPECIFIED, FM_Mono));
+	if (m_font) {
+		core::dimension2d<u32> dim = m_font->getDimension(L"M");
+		m_fontsize = v2u32(MYMAX(dim.Width, 1), MYMAX(dim.Height, 1));
+	}
+	m_cache_clickable_chat_weblinks = g_settings->getBool("clickable_chat_weblinks");
+
+	if (m_screensize.X != 0 && m_screensize.Y != 0)
+		reformatConsole();
 }
 
 void GUIChatConsole::openConsole(f32 scale)
@@ -152,6 +196,7 @@ void GUIChatConsole::setKeyboardActive(bool on)
 
 GUIChatConsole::~GUIChatConsole()
 {
+	g_settings->deregisterAllChangedCallbacks(this);
 	if (s_instance == this)
 		s_instance = nullptr;
 }
