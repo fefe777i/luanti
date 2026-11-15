@@ -89,7 +89,10 @@ std::vector<VariantTransform> SkinnedMesh::animateMesh(
 	std::vector<VariantTransform> result(AllJoints.size());
 	for (const auto &progress : progresses) {
 		const auto &anim = animations.at(progress.track_nr);
-		assert(progress.frame >= 0 && progress.frame <= anim.end_frame);
+		// The frame can lie past the end of this mesh's animation, e.g. when a
+		// model with a different (shorter) animation is swapped in. Don't abort
+		// the game because of it, just stay inside the animation.
+		const f32 frame = std::clamp(progress.frame, 0.0f, (f32)anim.end_frame);
 		for (const auto &joint_keys : anim.joint_keys) {
 			const auto joint_id = joint_keys.joint_id;
 			if (animated_joints[joint_id])
@@ -105,7 +108,7 @@ std::vector<VariantTransform> SkinnedMesh::animateMesh(
 			// .gltf does not allow animation of nodes using matrix transforms.
 			// Note that a decomposition into a TRS transform need not exist!
 
-			joint_keys.keys.updateTransform(progress.frame, trs);
+			joint_keys.keys.updateTransform(frame, trs);
 			if (progress.blend < 1.0f && old_transforms[joint_id].has_value()) {
 				// Blend with old transform
 				const auto &old_transform = *old_transforms[joint_id];

@@ -4286,6 +4286,10 @@ bool Server::requestDimensionSwitch(const std::string &name, std::string &error)
 		return false;
 	}
 	if (m_dimension_switch_requested) {
+		// Standing in a portal asks again every step until the game has
+		// stopped: asking for the same dimension again is not an error.
+		if (name == m_dimension_switch_target)
+			return true;
 		error = "a dimension switch is already in progress";
 		return false;
 	}
@@ -4297,6 +4301,7 @@ bool Server::requestDimensionSwitch(const std::string &name, std::string &error)
 	actionstream << "Switching dimension \"" << m_dimension << "\" -> \""
 		<< name << "\"" << std::endl;
 	// The client notices this, stops the game and starts it again in the new dimension
+	m_dimension_switch_target = name;
 	m_dimension_switch_requested = true;
 	return true;
 }

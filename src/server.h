@@ -716,6 +716,7 @@ private:
 	// Dimension whose map is loaded (see dimension.h)
 	std::string m_dimension = "overworld";
 	std::atomic<bool> m_dimension_switch_requested{false};
+	std::string m_dimension_switch_target;
 	u16 m_max_chatmessage_length;
 	// For "dedicated" server list flag
 	bool m_dedicated;
