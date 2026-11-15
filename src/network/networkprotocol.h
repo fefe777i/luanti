@@ -470,6 +470,9 @@ enum ToClientCommand : u16
 			u8 button_count
 			for each button: string name, string image, u8 action
 			string active_button
+			[optional] u8 float_buttons
+			if float_buttons:
+				v3f base, f32 height, string drag_button
 	*/
 
 	TOCLIENT_HUDADD = 0x49,

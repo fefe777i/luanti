@@ -106,6 +106,26 @@ public:
 	// Toolbar of the RTS camera. The buttons come from the server.
 	void setRtsButtons(const std::vector<RtsButton> &buttons, const std::string &active);
 
+	/**
+	 * The toolbar floats above a point of the world (the phantom of a building).
+	 * base and top are the screen positions of the bottom and the top of
+	 * the phantom. The button named drag_button can be dragged over the
+	 * screen: the game then gets the screen position the base is dragged to.
+	 */
+	void setRtsFloat(bool enabled, const v2s32 &base, const v2s32 &top,
+			const std::string &drag_button);
+	struct RtsDrag
+	{
+		v2s32 pos;  // where the base of the phantom is dragged to (screen)
+		bool end;   // finger released
+	};
+	std::optional<RtsDrag> takeRtsDrag()
+	{
+		auto res = m_rts_drag_result;
+		m_rts_drag_result.reset();
+		return res;
+	}
+
 	// Name of the toolbar button that was pressed, or nothing. Taken once.
 	std::optional<std::string> takeRtsButton()
 	{
@@ -266,6 +286,21 @@ private:
 	std::optional<std::string> m_rts_button_result;
 	void buildRtsButtons();
 	void refreshRtsButtonColors();
+
+	// floating toolbar and dragging of its button
+	bool m_rts_float = false;
+	v2s32 m_rts_float_base, m_rts_float_top;
+	std::string m_rts_float_drag;
+	bool m_rts_dragging = false;
+	size_t m_rts_drag_pointer = 0;
+	v2s32 m_rts_drag_grab;  // finger - base when the drag started
+	v2s32 m_rts_drag_up;    // top - base when the drag started
+	v2s32 m_rts_drag_base;  // where the base is dragged to now
+	u64 m_rts_drag_hold_until = 0; // keep the dropped place until the server answers
+	u64 m_rts_drag_last_send = 0;
+	std::optional<RtsDrag> m_rts_drag_result;
+	void layoutRtsFloat();
+	void rtsButtonMoved(size_t button, size_t pointer_id, const v2s32 &pos);
 
 	// RTS selection box
 	bool m_rts_box_active = false;

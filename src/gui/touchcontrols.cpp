@@ -503,6 +503,14 @@ void TouchControls::handleReleaseEvent(size_t pointer_id)
 	if (rts_btn != m_rts_button_pointers.end()) {
 		const size_t idx = rts_btn->second;
 		m_rts_button_pointers.erase(rts_btn);
+		if (m_rts_dragging && pointer_id == m_rts_drag_pointer) {
+			// dropped: the game moves the phantom there, no button click
+			m_rts_dragging = false;
+			m_rts_drag_hold_until = porting::getTimeMs() + 700;
+			m_rts_drag_result = RtsDrag{m_rts_drag_base, true};
+			refreshRtsButtonColors();
+			return;
+		}
 		if (idx < m_rts_buttons.size()) {
 			m_rts_button_result = m_rts_buttons[idx].def.name;
 			if (!m_rts_buttons[idx].def.action)
@@ -720,6 +728,16 @@ void TouchControls::translateEvent(const SEvent &event)
 				m_pointer_pos[event.TouchInput.ID] == touch_pos)
 			return;
 
+		// a finger on a button of the toolbar: maybe dragging it
+		{
+			auto rbtn = m_rts_button_pointers.find(event.TouchInput.ID);
+			if (rbtn != m_rts_button_pointers.end()) {
+				rtsButtonMoved(rbtn->second, event.TouchInput.ID, touch_pos);
+				m_pointer_pos[event.TouchInput.ID] = touch_pos;
+				return;
+			}
+		}
+
 		const v2s32 dir_free_original = touch_pos - m_pointer_downpos[event.TouchInput.ID];
 		const v2s32 free_joystick_center = m_pointer_pos[event.TouchInput.ID];
 		const v2s32 dir_free = touch_pos - free_joystick_center;
@@ -919,7 +937,88 @@ void TouchControls::buildRtsButtons()
 		b.image = grab_gui_element<IGUIImage>(img);
 		m_rts_buttons.push_back(std::move(b));
 	}
+	if (m_rts_float)
+		layoutRtsFloat();
 	refreshRtsButtonColors();
+}
+
+void TouchControls::setRtsFloat(bool enabled, const v2s32 &base, const v2s32 &top,
+		const std::string &drag_button)
+{
+	const bool mode_changed = enabled != m_rts_float;
+	m_rts_float = enabled;
+	m_rts_float_base = base;
+	m_rts_float_top = top;
+	m_rts_float_drag = drag_button;
+
+	if (mode_changed) {
+		// corner <-> floating: make the buttons again
+		m_rts_dragging = false;
+		m_rts_button_pointers.clear();
+		buildRtsButtons();
+		return;
+	}
+	if (enabled)
+		layoutRtsFloat();
+}
+
+// Puts the buttons in a row above the phantom (or above the place where it
+// is dragged to)
+void TouchControls::layoutRtsFloat()
+{
+	const size_t n = m_rts_buttons.size();
+	if (n == 0)
+		return;
+
+	v2s32 top = m_rts_float_top;
+	if (m_rts_dragging || porting::getTimeMs() < m_rts_drag_hold_until)
+		top = m_rts_drag_base + m_rts_drag_up;
+
+	const s32 size = std::max<s32>(32, (m_button_size * 3) / 4);
+	const s32 gap = std::max<s32>(4, size / 8);
+	const s32 w = (s32)n * size + ((s32)n - 1) * gap;
+	const s32 sw = (s32)m_screensize.X, sh = (s32)m_screensize.Y;
+	s32 x0 = top.X - w / 2;
+	s32 y0 = top.Y - 2 * gap - size;
+	x0 = std::max<s32>(0, std::min<s32>(x0, sw - w));
+	y0 = std::max<s32>(0, std::min<s32>(y0, sh - size));
+
+	for (size_t i = 0; i < n; i++) {
+		const s32 x = x0 + (s32)i * (size + gap);
+		recti r(x, y0, x + size, y0 + size);
+		if (m_rts_buttons[i].rect != r) {
+			m_rts_buttons[i].rect = r;
+			m_rts_buttons[i].image->setRelativePosition(r);
+		}
+	}
+}
+
+void TouchControls::rtsButtonMoved(size_t button, size_t pointer_id, const v2s32 &pos)
+{
+	if (!m_rts_float || button >= m_rts_buttons.size() ||
+			m_rts_buttons[button].def.name != m_rts_float_drag)
+		return;
+
+	if (!m_rts_dragging) {
+		const v2s32 down = m_pointer_downpos[pointer_id];
+		const s32 threshold = std::max<s32>(12, m_button_size / 4);
+		if (down.getDistanceFromSQ(pos) < (u32)(threshold * threshold))
+			return;
+		m_rts_dragging = true;
+		m_rts_drag_pointer = pointer_id;
+		m_rts_drag_grab = down - m_rts_float_base;
+		m_rts_drag_up = m_rts_float_top - m_rts_float_base;
+	}
+
+	m_rts_drag_base = pos - m_rts_drag_grab;
+	layoutRtsFloat();
+
+	// not too often: the server moves the phantom and answers
+	const u64 now = porting::getTimeMs();
+	if (now - m_rts_drag_last_send >= 50) {
+		m_rts_drag_last_send = now;
+		m_rts_drag_result = RtsDrag{m_rts_drag_base, false};
+	}
 }
 
 void TouchControls::refreshRtsButtonColors()

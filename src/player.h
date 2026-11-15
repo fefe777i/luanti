@@ -190,6 +190,13 @@ struct RtsCameraParams
 	f32 dist_max = 60.0f;  // farthest zoom
 	std::vector<RtsButton> buttons; // toolbar
 	std::string active_button;      // highlighted button
+
+	// The toolbar can float above a point of the world (the phantom of a
+	// building) instead of sitting in the screen corner.
+	bool float_buttons = false;
+	v3f float_base;                 // centre of the bottom of the phantom, in nodes
+	f32 float_height = 1.0f;        // height of the phantom, in nodes
+	std::string drag_button;        // this button can be dragged over the screen
 };
 
 class Player

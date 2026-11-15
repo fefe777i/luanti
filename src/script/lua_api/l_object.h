@@ -399,6 +399,9 @@ private:
 	// set_camera(self, {params})
 	static int l_set_camera(lua_State *L);
 
+	// set_rts_float(self, {base = pos, height = nodes, drag = "button"} | nil)
+	static int l_set_rts_float(lua_State *L);
+
 	// get_camera(self)
 	static int l_get_camera(lua_State *L);
 

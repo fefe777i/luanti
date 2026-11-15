@@ -2096,6 +2096,17 @@ void Game::updateRtsCamera(f32 dtime, CameraOrientation *target, CameraOrientati
 			m_rts_active_applied = rts.active_button;
 			m_rts_buttons_valid = true;
 		}
+		// toolbar floating above the phantom of a building
+		if (rts.float_buttons) {
+			v2s32 base, top;
+			const bool ok = rtsWorldToScreen(rts.float_base, &base) &&
+					rtsWorldToScreen(rts.float_base + v3f(0.0f, rts.float_height, 0.0f), &top);
+			g_touchcontrols->setRtsFloat(ok, base, top, rts.drag_button);
+		} else {
+			g_touchcontrols->setRtsFloat(false, v2s32(), v2s32(), "");
+		}
+		if (auto drag = g_touchcontrols->takeRtsDrag())
+			sendRtsDrag(drag->pos, drag->end);
 		if (auto pressed = g_touchcontrols->takeRtsButton()) {
 			StringMap fields;
 			fields["rts_button"] = *pressed;
@@ -2183,6 +2194,42 @@ void Game::updateRtsCamera(f32 dtime, CameraOrientation *target, CameraOrientati
 
 	player->setPosition(eye - player->getEyeOffset());
 	player->setSpeed(v3f(0.0f));
+}
+
+// Screen position of a point of the world (nodes). False if it is behind the camera.
+bool Game::rtsWorldToScreen(const v3f &nodes_pos, v2s32 *out)
+{
+	scene::ICameraSceneNode *cam = camera->getCameraNode();
+	v3f w = nodes_pos * BS - intToFloat(camera->getOffset(), BS);
+	core::matrix4 trans = cam->getProjectionMatrix();
+	trans *= cam->getViewMatrix();
+	f32 p[4] = { w.X, w.Y, w.Z, 1.0f };
+	trans.multiplyWith1x4Matrix(p);
+	if (p[3] <= 0.0f)
+		return false;
+	const f32 inv = core::reciprocal(p[3]);
+	const v2u32 ss = driver->getScreenSize();
+	out->X = (s32)(ss.X * (0.5f * p[0] * inv + 0.5f));
+	out->Y = (s32)(ss.Y * (0.5f - p[1] * inv * 0.5f));
+	return true;
+}
+
+// Sends the screen position the phantom is dragged to: the camera position
+// and the direction of the ray through it. The server finds the ground.
+void Game::sendRtsDrag(const v2s32 &pos, bool end)
+{
+	auto *coll = device->getSceneManager()->getSceneCollisionManager();
+	const core::line3d<f32> ray = coll->getRayFromScreenCoordinates(pos);
+	v3f dir = ray.end - ray.start;
+	dir.normalize();
+	const v3f eye = camera->getPosition() / BS;
+
+	StringMap fields;
+	fields["rts_drag"] = ftos(eye.X) + "," + ftos(eye.Y) + "," + ftos(eye.Z) + ";" +
+			ftos(dir.X) + "," + ftos(dir.Y) + "," + ftos(dir.Z);
+	if (end)
+		fields["rts_drag_end"] = "1";
+	client->sendInventoryFields("", fields);
 }
 
 void Game::sendRtsBox(const v2s32 &a, const v2s32 &b)

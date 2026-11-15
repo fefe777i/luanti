@@ -2103,6 +2103,10 @@ void Server::SendCamera(session_t peer_id, Player *player)
 		for (const RtsButton &b : rts.buttons)
 			pkt << b.name << b.image << static_cast<u8>(b.action ? 1 : 0);
 		pkt << rts.active_button;
+		// floating toolbar (optional trailing part)
+		pkt << static_cast<u8>(rts.float_buttons ? 1 : 0);
+		if (rts.float_buttons)
+			pkt << rts.float_base << rts.float_height << rts.drag_button;
 	}
 
 	Send(&pkt);

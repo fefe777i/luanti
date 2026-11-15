@@ -1638,6 +1638,16 @@ void Client::handleCommand_Camera(NetworkPacket* pkt)
 						rts.buttons.push_back(std::move(b));
 				}
 				*pkt >> rts.active_button;
+
+				if (pkt->hasRemainingBytes()) {
+					u8 floating = 0;
+					*pkt >> floating;
+					if (floating) {
+						rts.float_buttons = true;
+						*pkt >> rts.float_base >> rts.float_height >> rts.drag_button;
+						rts.float_height = rangelim(rts.float_height, 0.5f, 200.0f);
+					}
+				}
 			}
 		}
 	}

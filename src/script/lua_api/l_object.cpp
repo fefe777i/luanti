@@ -790,12 +790,54 @@ int ObjectRef::l_set_camera(lua_State *L)
 				std::swap(rts.max_x, rts.min_x);
 			if (rts.max_z < rts.min_z)
 				std::swap(rts.max_z, rts.min_z);
+			// the floating toolbar is set with set_rts_float, keep it
+			rts.float_buttons = player->rts_camera.float_buttons;
+			rts.float_base = player->rts_camera.float_base;
+			rts.float_height = player->rts_camera.float_height;
+			rts.drag_button = player->rts_camera.drag_button;
 			player->rts_camera = rts;
 		}
 		lua_pop(L, 1);
 	}
 
 	getServer(L)->SendCamera(player->getPeerId(), player);
+	return 0;
+}
+
+// set_rts_float(self, {base = pos, height = nodes, drag = "button name"} | nil)
+// The RTS toolbar floats above the given point of the world; the button
+// named "drag" can be dragged with a finger (the client then sends the
+// fields rts_drag = "eye;direction" and, when released, rts_drag_end).
+int ObjectRef::l_set_rts_float(lua_State *L)
+{
+	NO_MAP_LOCK_REQUIRED;
+	ObjectRef *ref = checkObject<ObjectRef>(L, 1);
+	RemotePlayer *player = getplayer(ref);
+	if (player == nullptr)
+		return 0;
+
+	RtsCameraParams &rts = player->rts_camera;
+	if (lua_isnoneornil(L, 2)) {
+		if (!rts.float_buttons)
+			return 0;
+		rts.float_buttons = false;
+		rts.drag_button.clear();
+	} else {
+		luaL_checktype(L, 2, LUA_TTABLE);
+		lua_getfield(L, 2, "base");
+		rts.float_base = check_v3f(L, -1);
+		lua_pop(L, 1);
+		lua_getfield(L, 2, "height");
+		rts.float_height = lua_isnumber(L, -1) ? (f32)lua_tonumber(L, -1) : 1.0f;
+		lua_pop(L, 1);
+		lua_getfield(L, 2, "drag");
+		rts.drag_button = lua_isstring(L, -1) ? lua_tostring(L, -1) : "";
+		lua_pop(L, 1);
+		rts.float_buttons = true;
+	}
+
+	if (rts.enabled)
+		getServer(L)->SendCamera(player->getPeerId(), player);
 	return 0;
 }
 
@@ -3247,6 +3289,7 @@ luaL_Reg ObjectRef::methods[] = {
 	luamethod(ObjectRef, get_flags),
 	luamethod(ObjectRef, set_camera),
 	luamethod(ObjectRef, get_camera),
+	luamethod(ObjectRef, set_rts_float),
 
 	{0,0}
 };

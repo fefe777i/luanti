@@ -183,6 +183,9 @@ protected:
 	void updateRtsCamera(f32 dtime, CameraOrientation *target, CameraOrientation *view);
 	// Sends the RTS selection box (screen corners) to the server
 	void sendRtsBox(const v2s32 &a, const v2s32 &b);
+	// Floating toolbar over a building phantom: projection and drag
+	bool rtsWorldToScreen(const v3f &nodes_pos, v2s32 *out);
+	void sendRtsDrag(const v2s32 &pos, bool end);
 	void updateCameraOrientation(CameraOrientation *cam, float dtime);
 	bool getTogglableKeyState(GameKeyType key, bool toggling_enabled, bool prev_key_state);
 	void updatePlayerControl(const CameraOrientation &cam);
