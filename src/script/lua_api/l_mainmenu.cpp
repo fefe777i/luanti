@@ -1100,21 +1100,6 @@ int ModApiMainMenu::l_share_file(lua_State *L)
 }
 
 /******************************************************************************/
-int ModApiMainMenu::l_install_apk(lua_State *L)
-{
-	const char *path = luaL_checkstring(L, 1);
-
-	CHECK_SECURE_PATH(L, path, false)
-
-#ifdef __ANDROID__
-	lua_pushboolean(L, porting::installApkAndroid(path));
-#else
-	lua_pushboolean(L, false);
-#endif
-	return 1;
-}
-
-/******************************************************************************/
 int ModApiMainMenu::l_do_async_callback(lua_State *L)
 {
 	MainMenuScripting *script = getScriptApi<MainMenuScripting>(L);
@@ -1240,7 +1225,6 @@ void ModApiMainMenu::Initialize(lua_State *L, int top)
 	API_FCT(open_url_dialog);
 	API_FCT(open_dir);
 	API_FCT(share_file);
-	API_FCT(install_apk);
 	API_FCT(do_async_callback);
 	API_FCT(copy_to_clipboard);
 	// Workshop 47 skin picker

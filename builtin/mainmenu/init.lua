@@ -36,7 +36,6 @@ dofile(menupath .. DIR_DELIM .. "dlg_delete_world.lua")
 dofile(menupath .. DIR_DELIM .. "dlg_register.lua")
 dofile(menupath .. DIR_DELIM .. "dlg_rename_modpack.lua")
 dofile(menupath .. DIR_DELIM .. "dlg_version_info.lua")
-dofile(menupath .. DIR_DELIM .. "dlg_ws47_update.lua")
 dofile(menupath .. DIR_DELIM .. "dlg_reinstall_mtg.lua")
 dofile(menupath .. DIR_DELIM .. "dlg_rebind_keys.lua")
 dofile(menupath .. DIR_DELIM .. "dlg_clients_list.lua")
@@ -150,7 +149,6 @@ local function init_globals()
 
 	-- asynchronous, will only be shown if we're still on "maintab"
 	check_new_version()
-	check_ws47_update()
 end
 
 assert(os.execute == nil)

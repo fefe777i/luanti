@@ -16,7 +16,6 @@ set(BUILTIN_MAINMENU_SRCS
 	mainmenu/dlg_rename_modpack.lua
 	mainmenu/dlg_server_list_mods.lua
 	mainmenu/dlg_version_info.lua
-	mainmenu/dlg_ws47_update.lua
 	mainmenu/game_theme.lua
 	mainmenu/init.lua
 	mainmenu/serverlistmgr.lua

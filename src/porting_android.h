@@ -50,13 +50,6 @@ void requestMicrophonePermission();
 void shareFileAndroid(const std::string &path);
 
 /**
- * Opens the system installer for the APK at path.
- * Returns false if the user has to allow installs from this app first
- * (the permission screen is opened) or the file cannot be installed.
- */
-bool installApkAndroid(const std::string &path);
-
-/**
  * Shows/hides notification that the game is running
  *
  * @param show whether to show/hide the notification

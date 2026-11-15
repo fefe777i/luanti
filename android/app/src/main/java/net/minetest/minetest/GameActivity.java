@@ -278,41 +278,6 @@ public class GameActivity extends SDLActivity {
 		startActivity(shareIntent);
 	}
 
-	// Opens the system installer for a downloaded APK (in-game updates).
-	// Returns false if the user first has to allow installs from this app.
-	public boolean installApk(String path) {
-		File file = new File(path);
-		if (!file.exists()) {
-			Log.e("GameActivity", "APK " + file.getAbsolutePath() + " doesn't exist");
-			return false;
-		}
-
-		if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
-				!getPackageManager().canRequestPackageInstalls()) {
-			// Take the user to the "install unknown apps" switch of this app
-			Intent settings = new Intent(android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
-					Uri.parse("package:" + getPackageName()));
-			try {
-				startActivity(settings);
-			} catch (ActivityNotFoundException e) {
-				Log.e("GameActivity", "Cannot open install permission settings");
-			}
-			return false;
-		}
-
-		Uri fileUri = FileProvider.getUriForFile(this, "net.workshop47.game.fileprovider", file);
-		Intent intent = new Intent(Intent.ACTION_VIEW);
-		intent.setDataAndType(fileUri, "application/vnd.android.package-archive");
-		intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-		try {
-			startActivity(intent);
-		} catch (ActivityNotFoundException e) {
-			Log.e("GameActivity", "No package installer found");
-			return false;
-		}
-		return true;
-	}
-
 	public String getLanguage() {
 		String langCode = Locale.getDefault().getLanguage();
 
