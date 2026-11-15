@@ -449,6 +449,11 @@ void set_default_settings()
 	settings->setDefault("update_information_url", "");
 #endif
 
+	// Workshop 47: in-game updates. The address of update.json that the
+	// GitHub workflow publishes next to the APK. Empty = never check.
+	settings->setDefault("ws47_update_url",
+			"https://github.com/fefe777i/luanti/releases/download/latest/update.json");
+
 	// Server
 	settings->setDefault("strip_color_codes", "true");
 #ifndef NDEBUG

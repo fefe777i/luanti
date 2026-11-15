@@ -41,7 +41,6 @@ dofile(gamepath .. "hud.lua")
 dofile(gamepath .. "knockback.lua")
 dofile(gamepath .. "async.lua")
 dofile(gamepath .. "death_screen.lua")
-dofile(gamepath .. "tablist.lua")
 
 core.after(0, builtin_shared.cache_content_ids)
 

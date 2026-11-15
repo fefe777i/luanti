@@ -206,6 +206,20 @@ void shareFileAndroid(const std::string &path)
 	jnienv->CallVoidMethod(activity, url_open, jurl);
 }
 
+bool installApkAndroid(const std::string &path)
+{
+	jmethodID install = jnienv->GetMethodID(activityClass, "installApk",
+			"(Ljava/lang/String;)Z");
+
+	FATAL_ERROR_IF(install == nullptr,
+		"porting::installApkAndroid unable to find Java installApk method");
+
+	jstring jpath = jnienv->NewStringUTF(path.c_str());
+	jboolean ok = jnienv->CallBooleanMethod(activity, install, jpath);
+	jnienv->DeleteLocalRef(jpath);
+	return ok == JNI_TRUE;
+}
+
 void setPlayingNowNotification(bool show)
 {
 	jmethodID play_notification = jnienv->GetMethodID(activityClass,
