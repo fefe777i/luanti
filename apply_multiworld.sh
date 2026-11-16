@@ -3,6 +3,7 @@
 #   host_all_worlds.patch       - one server per dimension for "Host game"
 #   lazy_dimensions.patch       - dimension servers start on demand and stop when empty
 #   dimension_port_reuse.patch  - a stopped dimension gives its port back
+#   dimension_single_port.patch - all dimensions behind ONE public port (router)
 #   touch_panzoom.patch         - pan_zoom_container + fixed touch scrolling
 set -e
 cd "$(dirname "$0")"
@@ -11,16 +12,23 @@ cd "$(dirname "$0")"
 # patch no longer applies in reverse once a later one is in.
 applied() { [ -f "$1" ] && git apply --reverse --check "$1" >/dev/null 2>&1; }
 
-for patch in host_all_worlds.patch lazy_dimensions.patch dimension_port_reuse.patch touch_panzoom.patch; do
+for patch in host_all_worlds.patch lazy_dimensions.patch dimension_port_reuse.patch \
+		dimension_single_port.patch touch_panzoom.patch; do
 	[ -f "$patch" ] || continue
 	case "$patch" in
 	host_all_worlds.patch)
-		if applied lazy_dimensions.patch || applied dimension_port_reuse.patch; then
+		if applied lazy_dimensions.patch || applied dimension_port_reuse.patch ||
+				applied dimension_single_port.patch; then
 			echo "$patch: already applied (with a later patch)."
 			continue
 		fi ;;
 	lazy_dimensions.patch)
-		if applied dimension_port_reuse.patch; then
+		if applied dimension_port_reuse.patch || applied dimension_single_port.patch; then
+			echo "$patch: already applied (with a later patch)."
+			continue
+		fi ;;
+	dimension_port_reuse.patch)
+		if applied dimension_single_port.patch; then
 			echo "$patch: already applied (with a later patch)."
 			continue
 		fi ;;

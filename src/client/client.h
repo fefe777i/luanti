@@ -451,12 +451,16 @@ public:
 	// Hostname of the connected server (but can also be a numerical IP)
 	// The server asked us (TOCLIENT_TRANSFER) to continue on another server
 	bool hasTransferRequest() const { return m_transfer_requested; }
-	bool getTransferRequest(std::string &address, u16 &port) const
+	bool getTransferRequest(std::string &address, u16 &port,
+			std::string &dimension) const
 	{
 		address = m_transfer_address;
 		port = m_transfer_port;
+		dimension = m_transfer_dimension;
 		return m_transfer_requested;
 	}
+	// Dimension to ask a router for (before connect())
+	void setRouteHint(const std::string &dimension) { m_route_hint = dimension; }
 
 	const std::string &getAddressName() const
 	{
@@ -561,6 +565,9 @@ private:
 	bool m_transfer_requested = false;
 	std::string m_transfer_address;
 	u16 m_transfer_port = 0;
+	std::string m_transfer_dimension;
+	std::string m_route_hint;
+	u16 m_server_port = 0;
 	ELoginRegister m_allow_login_or_register = ELoginRegister::Any;
 	Camera *m_camera = nullptr;
 	std::unique_ptr<Minimap> m_minimap;

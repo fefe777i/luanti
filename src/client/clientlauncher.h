@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include "dimensionhost.h"
 #include <memory>
 #include <string>
 #include "client/shader.h" // IWritableShaderSource
@@ -42,6 +43,10 @@ private:
 	// The player travelled to another dimension: start the world again
 	// right away (without the main menu)
 	bool m_dimension_restart = false;
+	// Servers of a hosted world: one per dimension (see dimensionhost.h).
+	// They run for as long as the host stays in the world, even while the
+	// host's client moves between dimensions.
+	std::unique_ptr<DimensionHost> m_dim_host;
 	bool random_input = false;
 	// Shader source of the main menu (menu clouds); it must outlive them
 	std::unique_ptr<IWritableShaderSource> ssrc;

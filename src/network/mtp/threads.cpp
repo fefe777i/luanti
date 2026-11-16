@@ -10,6 +10,7 @@
 #include "network/networkexceptions.h"
 #include "network/networkpacket.h"
 #include "util/serialize.h"
+#include "network/udprouter.h"
 
 namespace con
 {
@@ -523,7 +524,12 @@ void ConnectionSendThread::serve(Address bind_address)
 	LOG(dout_con << m_connection->getDesc()
 		<< "UDP serving at port " << bind_address.serializeString() << std::endl);
 	try {
-		m_connection->m_udpSocket.Bind(bind_address);
+		// Servers of a hosted world that share one public port get a virtual
+		// endpoint of the router instead of a socket (see udprouter.h)
+		if (auto endpoint = UDPSocket::findVirtual(bind_address.getPort()))
+			m_connection->m_udpSocket.attachVirtual(endpoint);
+		else
+			m_connection->m_udpSocket.Bind(bind_address);
 		m_connection->SetPeerID(PEER_ID_SERVER);
 	}
 	catch (SocketException &e) {
@@ -551,10 +557,44 @@ void ConnectionSendThread::connect(Address address)
 
 	m_connection->m_udpSocket.Bind(bind_addr);
 
+	if (!m_connection->m_route_hint.empty())
+		negotiateRoute(address);
+
 	// Send a dummy packet to server with peer_id = PEER_ID_INEXISTENT
 	m_connection->SetPeerID(PEER_ID_INEXISTENT);
 	NetworkPacket pkt(0, 0);
 	m_connection->Send(PEER_ID_SERVER, 0, &pkt, true);
+}
+
+// Asks a router (see udprouter.h) in front of the server to connect this
+// client to a given dimension. Servers without a router ignore the datagram,
+// so after a few tries we connect the normal way.
+void ConnectionSendThread::negotiateRoute(const Address &address)
+{
+	Connection &con = *m_connection;
+	const std::vector<u8> hello =
+		udprouter::makePacket(udprouter::PKT_HELLO, con.m_route_hint);
+
+	for (int attempt = 0; attempt < 12; attempt++) {
+		try {
+			con.m_udpSocket.Send(address, hello.data(), (int)hello.size());
+		} catch (const SendFailedException &) {
+			// Try again
+		}
+		// The receive thread sets the state when the answer arrives
+		for (int i = 0; i < 30; i++) {
+			if (con.m_route_state == 1) {
+				infostream << con.getDesc() << " route to dimension \""
+					<< con.m_route_hint << "\" accepted" << std::endl;
+				return;
+			}
+			if (stopRequested() || con.m_shutting_down)
+				return;
+			sleep_ms(10);
+		}
+	}
+	warningstream << con.getDesc() << " nobody answered for the dimension \""
+		<< con.m_route_hint << "\", connecting the normal way" << std::endl;
 }
 
 void ConnectionSendThread::disconnect()
@@ -967,6 +1007,22 @@ void ConnectionReceiveThread::receive(SharedBuffer<u8> &packetdata,
 			*packetdata, packetdata.getSize());
 		if (received_size < 0)
 			return;
+
+		{
+			// Answer of a router to negotiateRoute()
+			u8 router_type;
+			std::string router_dimension;
+			if (udprouter::parsePacket(*packetdata, received_size, router_type,
+					router_dimension)) {
+				if (router_dimension == m_connection->m_route_hint) {
+					if (router_type == udprouter::PKT_ACK)
+						m_connection->m_route_state = 1;
+					else if (router_type == udprouter::PKT_REFUSED)
+						m_connection->m_route_state = 2;
+				}
+				return;
+			}
+		}
 
 		if ((received_size < BASE_HEADER_SIZE) ||
 				(readU32(&packetdata[0]) != m_connection->GetProtocolID())) {

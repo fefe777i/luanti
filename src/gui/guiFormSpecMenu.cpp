@@ -49,6 +49,7 @@
 #include "guiInventoryList.h"
 #include "guiItemImage.h"
 #include "guiScrollContainer.h"
+#include "guiPanZoom.h"
 #include "guiHyperText.h"
 #include "guiScene.h"
 
@@ -444,6 +445,94 @@ void GUIFormSpecMenu::parseScrollContainerEnd(parserData *data, const std::strin
 	data->current_parent = data->current_parent->getParent()->getParent();
 	pos_offset = container_stack.top();
 	container_stack.pop();
+}
+
+// pan_zoom_container[<X>,<Y>;<W>,<H>;<name>;<zoom>;<min_zoom>,<max_zoom>]
+void GUIFormSpecMenu::parsePanZoomContainer(parserData *data, const std::string &element)
+{
+	std::vector<std::string> parts;
+	if (!precheckElement("pan_zoom_container start", element, 3, 5, parts))
+		return;
+
+	std::vector<std::string> v_pos  = split(parts[0], ',');
+	std::vector<std::string> v_geom = split(parts[1], ',');
+	std::string name = parts[2];
+	f32 zoom = 1.0f;
+	if (parts.size() >= 4 && !parts[3].empty())
+		zoom = stof(parts[3]);
+	f32 min_zoom = 0.2f, max_zoom = 4.0f;
+	if (parts.size() >= 5 && !parts[4].empty()) {
+		std::vector<std::string> v_lim = split(parts[4], ',');
+		if (v_lim.size() == 2) {
+			min_zoom = stof(v_lim[0]);
+			max_zoom = stof(v_lim[1]);
+		}
+	}
+
+	MY_CHECKPOS("pan_zoom_container", 0);
+	MY_CHECKGEOM("pan_zoom_container", 1);
+
+	v2s32 pos = getRealCoordinateBasePos(v_pos);
+	v2s32 geom = getRealCoordinateGeometry(v_geom);
+
+	FieldSpec spec(name, L"", L"", 258 + m_fields.size());
+	spec.ftype = f_PanZoom;
+	m_fields.push_back(spec);
+
+	GUIPanZoom *pz = new GUIPanZoom(Environment, data->current_parent, spec.fid,
+			core::rect<s32>(pos, pos + geom), imgsize.X, zoom, min_zoom, max_zoom);
+	// Sends "<value>" as the field `name` to the server
+	auto send_field = [this, name](const std::string &value) {
+		for (FieldSpec &s : m_fields) {
+			if (s.ftype == f_PanZoom && s.fname == name) {
+				s.fdefault = utf8_to_wide(value);
+				s.send = true;
+				acceptInput(quit_mode_no);
+				s.send = false;
+				break;
+			}
+		}
+	};
+	pz->setGestureEndCallback([send_field](f32 scale, f32 ux, f32 uy) {
+		send_field("PZ:" + ftos(scale) + "," + ftos(ux) + "," + ftos(uy));
+	});
+	pz->setTapCallback([send_field](f32 x, f32 y) {
+		send_field("TAP:" + ftos(x) + "," + ftos(y));
+	});
+
+	m_pan_zooms.emplace_back(name, pz); // keeps the reference from `new`
+	data->current_parent = pz;
+
+	// remove interfering offset of normal containers
+	container_stack.push(pos_offset);
+	pos_offset.X = 0.0f;
+	pos_offset.Y = 0.0f;
+}
+
+void GUIFormSpecMenu::parsePanZoomContainerEnd(parserData *data, const std::string &)
+{
+	if (!dynamic_cast<GUIPanZoom *>(data->current_parent) || container_stack.empty()) {
+		errorstream << "Invalid pan_zoom_container end element, "
+				<< "no matching pan_zoom_container start element" << std::endl;
+		return;
+	}
+	if (pos_offset.getLengthSQ() != 0.0f) {
+		errorstream << "Invalid pan_zoom_container end element, "
+				<< "an inner container was left open" << std::endl;
+		return;
+	}
+	data->current_parent = data->current_parent->getParent();
+	pos_offset = container_stack.top();
+	container_stack.pop();
+}
+
+bool GUIFormSpecMenu::preprocessTouch(const SEvent &event)
+{
+	for (auto &pz : m_pan_zooms) {
+		if (pz.second->handleTouch(event))
+			return true;
+	}
+	return false;
 }
 
 void GUIFormSpecMenu::parseList(parserData *data, const std::string &element)
@@ -2934,6 +3023,8 @@ void GUIFormSpecMenu::removeAll()
 		clickthrough_it->drop();
 	for (auto &scroll_container_it : m_scroll_containers)
 		scroll_container_it.second->drop();
+	for (auto &pan_zoom_it : m_pan_zooms)
+		pan_zoom_it.second->drop();
 }
 
 const std::unordered_map<std::string, std::function<void(GUIFormSpecMenu*, GUIFormSpecMenu::parserData *data,
@@ -2981,6 +3072,8 @@ const std::unordered_map<std::string, std::function<void(GUIFormSpecMenu*, GUIFo
 		{"scrollbaroptions",       &GUIFormSpecMenu::parseScrollBarOptions},
 		{"scroll_container",       &GUIFormSpecMenu::parseScrollContainer},
 		{"scroll_container_end",   &GUIFormSpecMenu::parseScrollContainerEnd},
+		{"pan_zoom_container",     &GUIFormSpecMenu::parsePanZoomContainer},
+		{"pan_zoom_container_end", &GUIFormSpecMenu::parsePanZoomContainerEnd},
 		{"set_focus",              &GUIFormSpecMenu::parseSetFocus},
 		{"model",                  &GUIFormSpecMenu::parseModel},
 		{"allow_close",            &GUIFormSpecMenu::parseAllowClose},
@@ -3087,6 +3180,7 @@ void GUIFormSpecMenu::regenerateGui(v2u32 screensize)
 	m_inventory_rings.clear();
 	m_dropdowns.clear();
 	m_scroll_containers.clear();
+	m_pan_zooms.clear();
 	theme_by_name.clear();
 	theme_by_type.clear();
 	m_clickthrough_elements.clear();
@@ -4087,6 +4181,8 @@ void GUIFormSpecMenu::acceptInput(FormspecQuitMode quitmode)
 						else
 							fields[name] = "VAL:" + itos(e->getPos());
 					}
+				} else if (s.ftype == f_PanZoom) {
+					fields[name] = wide_to_utf8(s.fdefault);
 				} else if (s.ftype == f_AnimatedImage) {
 					IGUIElement *element = getElementFromId(s.fid, true);
 					GUIAnimatedImage *e = nullptr;

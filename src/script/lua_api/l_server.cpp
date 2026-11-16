@@ -754,12 +754,35 @@ int ModApiServer::l_switch_dimension(lua_State *L)
 	return 2;
 }
 
-// transfer_player(name, address, port) -> true | false, error
+// wake_dimension_server(name) -> "ready" | "starting" | "failed", message
+// | nil (this server is not part of a hosted game: nothing to start)
+int ModApiServer::l_wake_dimension_server(lua_State *L)
+{
+	NO_MAP_LOCK_REQUIRED;
+	std::string name = luaL_checkstring(L, 1);
+
+	const std::string state = getServer(L)->wakeDimension(name);
+	if (state.empty()) {
+		lua_pushnil(L);
+		return 1;
+	}
+	if (state.compare(0, 7, "failed:") == 0) {
+		lua_pushstring(L, "failed");
+		lua_pushstring(L, state.c_str() + 7);
+		return 2;
+	}
+	lua_pushstring(L, state.c_str());
+	return 1;
+}
+
+// transfer_player(name, address, port[, dimension]) -> true | false, error
 // or transfer_player(name, subworld_name, pos) for custom per-player multiworld logic
 int ModApiServer::l_transfer_player(lua_State *L)
 {
 	NO_MAP_LOCK_REQUIRED;
-	if (lua_gettop(L) >= 3 && lua_isstring(L, 2)) {
+	// (name, subworld, pos): the third argument is a position table.
+	// (name, address, port): the third argument is a number.
+	if (lua_gettop(L) >= 3 && lua_isstring(L, 2) && lua_istable(L, 3)) {
 		std::string name = luaL_checkstring(L, 1);
 		std::string subworld = luaL_checkstring(L, 2);
 		v3f pos = check_v3f(L, 3);
@@ -770,11 +793,15 @@ int ModApiServer::l_transfer_player(lua_State *L)
 	std::string name = luaL_checkstring(L, 1);
 	std::string address = lua_isstring(L, 2) ? lua_tostring(L, 2) : "";
 	lua_Integer port = luaL_checkinteger(L, 3);
+	// Optional: the dimension to connect to when all of them share one port
+	// (then the port may be 0 = the port the player is connected to)
+	std::string dimension = lua_isstring(L, 4) ? lua_tostring(L, 4) : "";
 
 	std::string error;
-	if (port < 1 || port > 65535)
+	if (port < (dimension.empty() ? 1 : 0) || port > 65535)
 		error = "invalid port";
-	else if (getServer(L)->transferPlayer(name, address, (u16)port, error)) {
+	else if (getServer(L)->transferPlayer(name, address, (u16)port, error,
+			dimension)) {
 		lua_pushboolean(L, true);
 		return 1;
 	}
@@ -852,6 +879,7 @@ void ModApiServer::Initialize(lua_State *L, int top)
 	API_FCT(list_dimensions);
 	API_FCT(create_dimension);
 	API_FCT(switch_dimension);
+	API_FCT(wake_dimension_server);
 	API_FCT(create_subworld);
 	API_FCT(transfer_player);
 	API_FCT(get_player_subworld);

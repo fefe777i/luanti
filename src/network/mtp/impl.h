@@ -237,6 +237,7 @@ public:
 
 	void Serve(Address bind_addr);
 	void Connect(Address address);
+	void setRouteHint(const std::string &dimension) { m_route_hint = dimension; }
 	bool Connected();
 	void Disconnect();
 	bool ReceiveTimeoutMs(NetworkPacket *pkt, u32 timeout_ms);
@@ -303,6 +304,11 @@ private:
 	PeerHandler *m_bc_peerhandler;
 
 	std::atomic<bool> m_shutting_down = false;
+
+	// Dimension requested from a router (client side), see udprouter.h
+	std::string m_route_hint;
+	// 0: no answer yet, 1: accepted, 2: refused (the dimension is not running)
+	std::atomic<int> m_route_state{0};
 };
 
 } // namespace

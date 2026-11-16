@@ -6,6 +6,8 @@
 
 #include <iostream>
 #include <cstring>
+#include <chrono>
+#include <map>
 #include "util/numeric.h"
 #include "address.h"
 #include "constants.h"
@@ -57,6 +59,88 @@ void sockets_cleanup()
 }
 
 /*
+	VirtualEndpoint
+*/
+
+namespace {
+// A player sends a few dozen datagrams per second, so this is generous
+constexpr size_t VIRTUAL_QUEUE_LIMIT = 8192;
+
+std::mutex g_virtual_registry_mutex;
+std::map<u16, std::shared_ptr<VirtualEndpoint>> g_virtual_registry;
+}
+
+void VirtualEndpoint::push(const Address &from, const void *data, int size)
+{
+	if (size < 0)
+		return;
+	{
+		std::lock_guard<std::mutex> lock(m_mutex);
+		if (m_closed || m_queue.size() >= VIRTUAL_QUEUE_LIMIT)
+			return;
+		Datagram d;
+		d.from = from;
+		d.data.assign((const u8 *)data, (const u8 *)data + size);
+		m_queue.push_back(std::move(d));
+	}
+	m_cond.notify_one();
+}
+
+void VirtualEndpoint::send(const Address &to, const void *data, int size)
+{
+	SendFn fn;
+	{
+		std::lock_guard<std::mutex> lock(m_mutex);
+		if (m_closed)
+			return;
+		fn = m_send;
+	}
+	if (fn)
+		fn(to, data, size);
+}
+
+bool VirtualEndpoint::waitData(int timeout_ms)
+{
+	timeout_ms = MYMAX(timeout_ms, 0);
+	std::unique_lock<std::mutex> lock(m_mutex);
+	m_cond.wait_for(lock, std::chrono::milliseconds(timeout_ms),
+		[this] { return m_closed || !m_queue.empty(); });
+	return !m_queue.empty();
+}
+
+int VirtualEndpoint::receive(Address &from, void *data, int size)
+{
+	std::lock_guard<std::mutex> lock(m_mutex);
+	if (m_queue.empty())
+		return -1;
+	Datagram &d = m_queue.front();
+	size = MYMAX(size, 0);
+	int n = MYMIN((int)d.data.size(), size);
+	if (n > 0)
+		memcpy(data, d.data.data(), n);
+	from = d.from;
+	m_queue.pop_front();
+	return n;
+}
+
+void VirtualEndpoint::close()
+{
+	{
+		std::lock_guard<std::mutex> lock(m_mutex);
+		m_closed = true;
+		m_queue.clear();
+		m_send = nullptr;
+	}
+	m_cond.notify_all();
+}
+
+bool VirtualEndpoint::isClosed() const
+{
+	std::lock_guard<std::mutex> lock(m_mutex);
+	return m_closed;
+}
+
+/*
 	UDPSocket
 */
 
@@ -100,6 +184,8 @@ bool UDPSocket::init(bool ipv6, bool noExceptions)
 
 UDPSocket::~UDPSocket()
 {
+	if (auto ep = getVirtual())
+		ep->close();
 	if (m_handle >= 0) {
 #ifdef _WIN32
 		closesocket(m_handle);
@@ -109,8 +195,42 @@ UDPSocket::~UDPSocket()
 	}
 }
 
+void UDPSocket::attachVirtual(std::shared_ptr<VirtualEndpoint> endpoint)
+{
+	std::lock_guard<std::mutex> lock(m_virtual_mutex);
+	m_virtual = std::move(endpoint);
+}
+
+std::shared_ptr<VirtualEndpoint> UDPSocket::getVirtual() const
+{
+	std::lock_guard<std::mutex> lock(m_virtual_mutex);
+	return m_virtual;
+}
+
+void UDPSocket::registerVirtual(u16 port, std::shared_ptr<VirtualEndpoint> endpoint)
+{
+	std::lock_guard<std::mutex> lock(g_virtual_registry_mutex);
+	g_virtual_registry[port] = std::move(endpoint);
+}
+
+void UDPSocket::unregisterVirtual(u16 port)
+{
+	std::lock_guard<std::mutex> lock(g_virtual_registry_mutex);
+	g_virtual_registry.erase(port);
+}
+
+std::shared_ptr<VirtualEndpoint> UDPSocket::findVirtual(u16 port)
+{
+	std::lock_guard<std::mutex> lock(g_virtual_registry_mutex);
+	auto it = g_virtual_registry.find(port);
+	return it == g_virtual_registry.end() ? nullptr : it->second;
+}
+
 void UDPSocket::Bind(Address addr)
 {
+	if (getVirtual())
+		return;
+
 	if (addr.getFamily() != m_addr_family) {
 		const char *errmsg =
 				"Socket and bind address families do not match";
@@ -165,6 +285,11 @@ void UDPSocket::Bind(Address addr)
 
 void UDPSocket::Send(const Address &destination, const void *data, int size)
 {
+	if (auto ep = getVirtual()) {
+		ep->send(destination, data, size);
+		return;
+	}
+
 	bool dumping_packet = false; // for INTERNET_SIMULATOR
 
 	if (INTERNET_SIMULATOR)
@@ -205,6 +330,13 @@ void UDPSocket::Send(const Address &destination, const void *data, int size)
 
 int UDPSocket::Receive(Address &sender, void *data, int size)
 {
+	if (auto ep = getVirtual()) {
+		assert(m_timeout_ms >= 0);
+		if (!ep->waitData(m_timeout_ms))
+			return -1;
+		return ep->receive(sender, data, size);
+	}
+
 	// Return on timeout
 	assert(m_timeout_ms >= 0);
 	if (!WaitData(m_timeout_ms))
@@ -256,6 +388,9 @@ void UDPSocket::setTimeoutMs(int timeout_ms)
 
 bool UDPSocket::WaitData(int timeout_ms)
 {
+	if (auto ep = getVirtual())
+		return ep->waitData(timeout_ms);
+
 	timeout_ms = MYMAX(timeout_ms, 0);
 
 #ifdef _WIN32

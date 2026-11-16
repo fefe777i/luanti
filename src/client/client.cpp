@@ -453,7 +453,9 @@ void Client::connect(const Address &address, const std::string &address_name)
 	}
 
 	m_address_name = address_name;
+	m_server_port = address.getPort();
 	m_con.reset(con::createMTP(CONNECTION_TIMEOUT, address.isIPv6(), this));
+	m_con->setRouteHint(m_route_hint);
 
 	infostream << "Connecting to server at ";
 	address.print(infostream);

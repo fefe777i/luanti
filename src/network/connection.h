@@ -50,6 +50,9 @@ public:
 
 	virtual void Serve(Address bind_addr) = 0;
 	virtual void Connect(Address address) = 0;
+	// Before Connect(): the dimension the server should connect us to when it
+	// is a router for several dimensions (see network/udprouter.h)
+	virtual void setRouteHint(const std::string &dimension) { (void)dimension; }
 	virtual bool Connected() = 0;
 	virtual void Disconnect() = 0;
 	virtual void DisconnectPeer(session_t peer_id) = 0;

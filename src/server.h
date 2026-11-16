@@ -16,6 +16,7 @@
 #include "util/metricsbackend.h"
 #include "server/clientiface.h"
 #include "subworld.h"
+#include <functional>
 #include "threading/ordered_mutex.h"
 #include "translation.h"
 #include "sound_spec.h"
@@ -192,7 +193,11 @@ public:
 		Address bind_addr,
 		bool dedicated,
 		ChatInterface *iface = nullptr,
-		std::string *shutdown_errmsg = nullptr
+		std::string *shutdown_errmsg = nullptr,
+		// Several servers can run in one process (one per dimension, see
+		// client/dimensionhost.h). A non-empty value binds this server to the
+		// given dimension (overrides the \"dimension\" setting).
+		const std::string &bound_dimension = ""
 	);
 	~Server();
 	DISABLE_CLASS_COPY(Server);
@@ -368,6 +373,22 @@ public:
 
 	// --- Dimensions: separate worlds inside the world folder (see dimension.h) ---
 	const std::string &getCurrentDimension() const { return m_dimension; }
+	void setMasterAnnounce(bool announce) { m_announce = announce; }
+	// Notified after a dimension was created (by /newdimension or a mod).
+	// Set it before start().
+	void setDimensionCreatedCallback(std::function<void(const std::string &)> cb)
+			{ m_dimension_created_cb = std::move(cb); }
+	// Starts the server of a dimension on demand (hosted games only).
+	// The callback returns "ready", "starting" or "failed:<message>".
+	// Set it before start().
+	void setDimensionWakeCallback(std::function<std::string(const std::string &)> cb)
+			{ m_dimension_wake_cb = std::move(cb); }
+	// Empty string when this server is not part of a hosted game
+	std::string wakeDimension(const std::string &name)
+			{ return m_dimension_wake_cb ? m_dimension_wake_cb(name) : std::string(); }
+	// Clients that are connected or still connecting (thread-safe)
+	u32 getConnectedClientCount()
+			{ return m_clients.getClientIDs(CS_Created).size(); }
 	// Directory with the map of the current dimension
 	std::string getDimensionPath() const;
 	std::vector<std::string> listDimensions() const;
@@ -381,8 +402,11 @@ public:
 			{ return m_dimension_switch_requested; }
 	// Multiplayer: asks the client of a player to continue on another server
 	// of the same host ("" = the same address), see TOCLIENT_TRANSFER.
+	// With a dimension name the port may be 0 ("the port you are connected
+	// to"): all dimensions of the host are behind one port and the client
+	// asks for the dimension when it connects (see network/udprouter.h).
 	bool transferPlayer(const std::string &name, const std::string &address,
-			u16 port, std::string &error);
+			u16 port, std::string &error, const std::string &dimension = "");
 
 	// Sends the list of chat commands the player may use (chat suggestions).
 	// Returns false if the player is not connected.
@@ -715,11 +739,19 @@ private:
 	bool m_simple_singleplayer_mode;
 	// Dimension whose map is loaded (see dimension.h)
 	std::string m_dimension = "overworld";
+	// Dimension this server was explicitly bound to (empty: use settings)
+	std::string m_bound_dimension;
+	// Whether this server may announce itself to the server list
+	bool m_announce = true;
+	// Called (from any thread) after a dimension was created
+	std::function<void(const std::string &)> m_dimension_created_cb;
+	std::function<std::string(const std::string &)> m_dimension_wake_cb;
 	std::atomic<bool> m_dimension_switch_requested{false};
-	std::string m_dimension_switch_target;
 	u16 m_max_chatmessage_length;
 	// For "dedicated" server list flag
 	bool m_dedicated;
+	// Target of the pending dimension switch (see requestDimensionSwitch)
+	std::string m_dimension_switch_target;
 
 	// Game settings layer
 	Settings *m_game_settings = nullptr;

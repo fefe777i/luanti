@@ -2032,7 +2032,12 @@ void Client::handleCommand_Transfer(NetworkPacket *pkt)
 {
 	std::string address;
 	u16 port = 0;
+	std::string dimension;
 	*pkt >> address >> port;
+	// Servers that keep all dimensions behind one port add the one we
+	// should be connected to
+	if (pkt->hasRemainingBytes())
+		*pkt >> dimension;
 
 	// Only the same host is accepted: the saved password is used to log in there
 	if (!address.empty() && address != m_address_name) {
@@ -2040,6 +2045,9 @@ void Client::handleCommand_Transfer(NetworkPacket *pkt)
 			<< address << std::endl;
 		return;
 	}
+	// Port 0 with a dimension: the same port we are connected to
+	if (port == 0 && !dimension.empty())
+		port = m_server_port;
 	if (port == 0) {
 		warningstream << "Ignoring transfer request with invalid port" << std::endl;
 		return;
@@ -2048,5 +2056,6 @@ void Client::handleCommand_Transfer(NetworkPacket *pkt)
 	infostream << "Client: server asked to continue on port " << port << std::endl;
 	m_transfer_address = address;
 	m_transfer_port = port;
+	m_transfer_dimension = dimension;
 	m_transfer_requested = true;
 }

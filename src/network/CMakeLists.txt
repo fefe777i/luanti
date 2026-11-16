@@ -9,6 +9,7 @@ set(common_network_SRCS
 	${CMAKE_CURRENT_SOURCE_DIR}/networkpacket.cpp
 	${CMAKE_CURRENT_SOURCE_DIR}/networkprotocol.cpp
 	${CMAKE_CURRENT_SOURCE_DIR}/socket.cpp
+	${CMAKE_CURRENT_SOURCE_DIR}/udprouter.cpp
 	PARENT_SCOPE
 )
 

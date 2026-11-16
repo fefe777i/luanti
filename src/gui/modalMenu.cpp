@@ -306,6 +306,9 @@ bool GUIModalMenu::preprocessEvent(const SEvent &event)
 		irr_ptr<GUIModalMenu> holder;
 		holder.grab(this); // keep this alive until return (it might be dropped downstream [?])
 
+		if (preprocessTouch(event))
+			return true;
+
 		if (event.TouchInput.touchedCount == 1) {
 			m_pointer = v2s32(event.TouchInput.X, event.TouchInput.Y);
 

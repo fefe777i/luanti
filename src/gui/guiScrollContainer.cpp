@@ -68,7 +68,9 @@ bool GUIScrollContainer::OnEvent(const SEvent &event)
 			if (m_drag_active) {
 				f32 factor = (m_scrollfactor != 0.0f) ? m_scrollfactor : 1.0f;
 				s32 delta_scroll = (s32)(delta_px / factor);
-				m_scrollbar->setPos(m_drag_start_scrollbar_pos - delta_scroll);
+				// scroll_container's factor is negative (offset = pos * factor), so
+				// the position must change in the same direction as the finger.
+				m_scrollbar->setPos(m_drag_start_scrollbar_pos + delta_scroll);
 				updateScrolling();
 				return true;
 			}

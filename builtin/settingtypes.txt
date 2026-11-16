@@ -1115,6 +1115,11 @@ remote_media (Remote media) string
 #    Requires: enable_ipv6
 ipv6_server (IPv6 server) bool true
 
+#    "Host game": all worlds (dimensions) are reachable through the one port
+#    chosen in the menu, so one forwarded port or tunnel is enough.
+#    If disabled, every running world uses a port of its own.
+dimension_single_port (One port for all worlds) bool true
+
 [*Server Security] [server]
 
 #    New users need to input this password.

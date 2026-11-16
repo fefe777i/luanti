@@ -3221,6 +3221,29 @@ Elements
 * End of a scroll_container, following elements are no longer bound to this
   container.
 
+### `pan_zoom_container[<X>,<Y>;<W>,<H>;<name>;<zoom>;<min_zoom>,<max_zoom>]`
+
+* Requires real coordinates. A clipped area whose content can be dragged in
+  any direction with a finger or the mouse and zoomed with two fingers or the
+  mouse wheel. There are no scrollbars.
+* Elements after this one are placed inside the area (positions are relative
+  to its top-left corner), until `pan_zoom_container_end[]`.
+* `zoom` is the zoom the content is currently drawn at, `min_zoom`/`max_zoom`
+  limit the gesture (defaults: 1, 0.2 and 4).
+* While a gesture is going on the engine moves/scales the elements itself.
+  When it ends, the field `name` is sent as `"PZ:<scale>,<ux>,<uy>"`: a point
+  (x, y) of the content (formspec units from the top-left corner of the area)
+  is now at (scale * x + ux, scale * y + uy). The mod stores the new view and
+  redraws the content.
+* A tap (touch without dragging) is sent as the field `name` = `"TAP:<x>,<y>"`
+  (formspec units from the top-left corner of the area), so the mod can
+  decide what was tapped. Do not put buttons that need dragging over the
+  area: a drag that starts on a button does not move the content.
+
+### `pan_zoom_container_end[]`
+
+* End of a pan_zoom_container.
+
 ### `list[<inventory location>;<list name>;<X>,<Y>;<W>,<H>;<starting item index>]`
 
 * Show an inventory list if it has been sent to the client.

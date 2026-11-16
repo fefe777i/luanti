@@ -68,6 +68,7 @@ private:
 	void processNonReliableCommand(ConnectionCommandPtr &c);
 	void serve(Address bind_address);
 	void connect(Address address);
+	void negotiateRoute(const Address &address);
 	void disconnect();
 	void disconnect_peer(session_t peer_id);
 	void fix_peer_id(session_t own_peer_id);
