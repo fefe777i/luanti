@@ -53,6 +53,9 @@ public:
 	// Before Connect(): the dimension the server should connect us to when it
 	// is a router for several dimensions (see network/udprouter.h)
 	virtual void setRouteHint(const std::string &dimension) { (void)dimension; }
+	// Seconds without any packet (or without an answer to reliable data)
+	// after which a peer is dropped. Can be changed while connected.
+	virtual void setPeerTimeout(float seconds) { (void)seconds; }
 	virtual bool Connected() = 0;
 	virtual void Disconnect() = 0;
 	virtual void DisconnectPeer(session_t peer_id) = 0;
@@ -72,5 +75,10 @@ public:
 
 // MTP = Minetest Protocol
 IConnection *createMTP(float timeout, bool ipv6, PeerHandler *handler);
+
+// Peer timeout in seconds from the setting "connection_timeout", never less
+// than CONNECTION_TIMEOUT. A slow link (a tunnel, mobile data) needs more
+// than 30 s of silence before a connection can be called dead.
+float getConfiguredConnectionTimeout();
 
 } // namespace

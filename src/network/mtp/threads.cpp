@@ -194,8 +194,9 @@ void ConnectionSendThread::runTimeouts(float dtime, u32 peer_packet_quota)
 		*/
 		// When the connection is half-open give the peer less time.
 		// Note that this time is also fixed since the timeout is not reset in half-open state.
+		const float timeout = m_timeout;
 		const float peer_timeout = peer->isHalfOpen() ?
-			std::max(INIT_PHASE_MIN_TIMEOUT, m_timeout / 4) : m_timeout;
+			std::max(INIT_PHASE_MIN_TIMEOUT, timeout / 4) : timeout;
 		std::string reason;
 		if (peer->isTimedOut(peer_timeout, reason)) {
 			infostream << m_connection->getDesc()

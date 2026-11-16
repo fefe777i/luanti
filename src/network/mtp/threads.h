@@ -88,7 +88,8 @@ private:
 
 	Connection *m_connection = nullptr;
 	unsigned int m_max_packet_size;
-	float m_timeout;
+	// Changed from the main thread (loading content takes long)
+	std::atomic<float> m_timeout;
 	std::queue<OutgoingPacket> m_outgoing_queue;
 	Semaphore m_send_sleep_semaphore;
 

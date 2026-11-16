@@ -1304,6 +1304,11 @@ Connection::Connection(u32 max_packet_size, float timeout,
 }
 
 
+void Connection::setPeerTimeout(float seconds)
+{
+	m_sendThread->setPeerTimeout(seconds);
+}
+
 Connection::~Connection()
 {
 	m_shutting_down = true;

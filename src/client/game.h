@@ -35,7 +35,9 @@ struct CameraOrientation {
 };
 
 #define GAME_FALLBACK_TIMEOUT 1.8f
-#define GAME_CONNECTION_TIMEOUT 10.0f
+#define GAME_CONNECTION_TIMEOUT 20.0f
+// Peer timeout while the server content (media, definitions) is loading
+#define GAME_LOADING_PEER_TIMEOUT 300.0f
 
 void the_game(volatile std::sig_atomic_t *kill,
 		InputHandler *input,

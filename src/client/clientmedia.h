@@ -87,6 +87,10 @@ public:
 	ClientMediaDownloader();
 	~ClientMediaDownloader();
 
+	// Files that had to be downloaded (not in the cache) and how many came
+	s32 getUncachedCount() const { return m_uncached_count; }
+	s32 getUncachedReceivedCount() const { return m_uncached_received_count; }
+
 	float getProgress() const {
 		if (m_uncached_count >= 1)
 			return 1.0f * m_uncached_received_count /

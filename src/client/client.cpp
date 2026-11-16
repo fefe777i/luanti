@@ -454,7 +454,7 @@ void Client::connect(const Address &address, const std::string &address_name)
 
 	m_address_name = address_name;
 	m_server_port = address.getPort();
-	m_con.reset(con::createMTP(CONNECTION_TIMEOUT, address.isIPv6(), this));
+	m_con.reset(con::createMTP(con::getConfiguredConnectionTimeout(), address.isIPv6(), this));
 	m_con->setRouteHint(m_route_hint);
 
 	infostream << "Connecting to server at ";
@@ -2072,6 +2072,21 @@ void Client::setFatalError(const LuaError &e)
 const Address Client::getServerAddress()
 {
 	return m_con ? m_con->GetPeerAddress(PEER_ID_SERVER) : Address();
+}
+
+void Client::setConnectionTimeout(float seconds)
+{
+	if (m_con)
+		m_con->setPeerTimeout(seconds);
+}
+
+void Client::mediaReceiveCounts(s32 &received, s32 &total)
+{
+	received = total = 0;
+	if (m_media_downloader) {
+		total = m_media_downloader->getUncachedCount();
+		received = m_media_downloader->getUncachedReceivedCount();
+	}
 }
 
 float Client::mediaReceiveProgress()

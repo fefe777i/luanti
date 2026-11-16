@@ -437,7 +437,7 @@ Server::Server(
 	m_gamespec(gamespec),
 	m_simple_singleplayer_mode(simple_singleplayer_mode),
 	m_dedicated(dedicated),
-	m_con(con::createMTP(CONNECTION_TIMEOUT, m_bind_addr.isIPv6(), this)),
+	m_con(con::createMTP(con::getConfiguredConnectionTimeout(), m_bind_addr.isIPv6(), this)),
 	m_itemdef(createItemDefManager()),
 	m_nodedef(createNodeDefManager()),
 	m_craftdef(createCraftDefManager()),

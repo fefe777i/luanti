@@ -1115,6 +1115,11 @@ remote_media (Remote media) string
 #    Requires: enable_ipv6
 ipv6_server (IPv6 server) bool true
 
+#    Seconds of silence after which a connection is considered dead (minimum 30).
+#    Raise it on slow links (tunnels, mobile data) if players get
+#    "Connection timed out" while loading.
+connection_timeout (Connection timeout) float 60.0 30.0 600.0
+
 #    "Host game": all worlds (dimensions) are reachable through the one port
 #    chosen in the menu, so one forwarded port or tunnel is enough.
 #    If disabled, every running world uses a port of its own.

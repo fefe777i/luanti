@@ -1626,6 +1626,11 @@ msgstr "Світу не існує, і жодної гри не обрано д�
 msgid "Media..."
 msgstr "Ресурси..."
 
+#: src/client/game.cpp
+#, c-format
+msgid "Media: %d of %d files"
+msgstr "Ресурси: завантажено %d з %d файлів"
+
 #: src/client/fontengine.cpp
 #, fuzzy
 msgid "Failed to find a valid font"

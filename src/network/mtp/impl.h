@@ -238,6 +238,7 @@ public:
 	void Serve(Address bind_addr);
 	void Connect(Address address);
 	void setRouteHint(const std::string &dimension) { m_route_hint = dimension; }
+	void setPeerTimeout(float seconds);
 	bool Connected();
 	void Disconnect();
 	bool ReceiveTimeoutMs(NetworkPacket *pkt, u32 timeout_ms);

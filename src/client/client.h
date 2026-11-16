@@ -365,6 +365,10 @@ public:
 	bool m_internal_server;
 
 	float mediaReceiveProgress();
+	// Files still to download in total and downloaded so far (0 = not known yet)
+	void mediaReceiveCounts(s32 &received, s32 &total);
+	// Loading content takes long, the connection must survive it
+	void setConnectionTimeout(float seconds);
 
 	void drawLoadScreen(const std::wstring &text, float dtime, int percent);
 	void afterContentReceived();

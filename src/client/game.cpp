@@ -28,6 +28,7 @@
 #include "gui/profilergraph.h"
 #include "localplayer.h"
 #include "minimap.h"
+#include "network/connection.h"
 #include "network/networkexceptions.h"
 #include "nodedef.h"         // Needed for determining pointing to nodes
 #include <ISceneCollisionManager.h> // RTS selection box rays
@@ -514,6 +515,10 @@ void Game::run()
 #endif
 
 	auto framemarker = FrameMarker("Game::run()-frame").started();
+
+	// The content is loaded, back to the normal timeout
+	if (client)
+		client->setConnectionTimeout(con::getConfiguredConnectionTimeout());
 
 	while (m_rendering_engine->run()
 			&& !(*kill || g_gamecallback->shutdown_requested
@@ -1173,6 +1178,11 @@ bool Game::getServerContent(bool *aborted)
 {
 	input->clear();
 
+	// Downloading and loading can take minutes on a slow link or with a lot of
+	// media, that must not be taken for a dead connection. Back to normal when
+	// the game starts (or the function fails and the connection is dropped).
+	client->setConnectionTimeout(GAME_LOADING_PEER_TIMEOUT);
+
 	FpsControl fps_control;
 	f32 dtime; // in seconds
 
@@ -1225,9 +1235,19 @@ bool Game::getServerContent(bool *aborted)
 			std::fixed(message);
 			message.precision(0);
 			float receive = client->mediaReceiveProgress() * 100;
-			message << gettext("Media...");
-			if (receive > 0)
-				message << " " << receive << "%";
+			s32 files_received, files_total;
+			client->mediaReceiveCounts(files_received, files_total);
+			if (files_total > 0) {
+				// "Resources: 120 of 540 files (22%)"
+				message.precision(0);
+				message << fmtgettext("Media: %d of %d files", (int)files_received,
+						(int)files_total);
+				message << " (" << receive << "%)";
+			} else {
+				message << gettext("Media...");
+				if (receive > 0)
+					message << " " << receive << "%";
+			}
 			message.precision(2);
 
 			if ((USE_CURL == 0) ||
