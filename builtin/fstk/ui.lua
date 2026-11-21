@@ -129,7 +129,11 @@ function ui.update()
 			formspec = {ui.childlist[ui.default]:get_formspec()}
 		end
 	end
-	core.update_formspec(table.concat(formspec))
+	local fs = table.concat(formspec)
+	if ws47_theme and ws47_theme.apply then
+		fs = ws47_theme.apply(fs)
+	end
+	core.update_formspec(fs)
 end
 
 --------------------------------------------------------------------------------

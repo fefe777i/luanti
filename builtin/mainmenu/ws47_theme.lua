@@ -9,14 +9,38 @@ ws47_theme.COLOR_BLUE   = "#5a6eff"
 ws47_theme.COLOR_BG     = "#14092eE0"      -- dark violet, semi-transparent
 ws47_theme.COLOR_BG_2   = "#1f0f3fE0"
 
+local function tex(name)
+	return core.formspec_escape(defaulttexturedir .. name)
+end
+
+-- Buttons: lavender metal frame with cyan gems (same look as the eye frame)
+ws47_theme.BUTTON_STYLE = "style_type[button,button_exit;" ..
+	"bgimg=" .. tex("ws47_btn.png") ..
+	";bgimg_hovered=" .. tex("ws47_btn_hover.png") ..
+	";bgimg_pressed=" .. tex("ws47_btn_press.png") ..
+	";bgimg_middle=9;bgcolor=#2a1250;bgcolor_hovered=#c43cff;" ..
+	"bgcolor_pressed=#ff3cd2;textcolor=#f1e9ff;border=false]"
+
 ws47_theme.STYLE_PREFIX = table.concat({
-	"style_type[button;bgcolor=#2a1250;bgcolor_hovered=#c43cff;" ..
-		"bgcolor_pressed=#ff3cd2;textcolor=#e8d9ff;border=true]",
+	ws47_theme.BUTTON_STYLE,
 	"style_type[field,pwdfield;textcolor=#ffffff;border=true]",
 	"style_type[label;textcolor=#e8d9ff]",
 	"style_type[checkbox;textcolor=#e8d9ff]",
 	"style_type[textarea;textcolor=#e8d9ff]",
 })
+
+-- Put the theme into a finished formspec right after its size[] element
+-- (used for every dialog / tab, so all buttons share the style)
+function ws47_theme.apply(formspec)
+	if core.settings:get_bool("ws47_classic_menu") then
+		return formspec
+	end
+	local _, stop = formspec:find("size%[[^%]]*%]")
+	if not stop then
+		return formspec
+	end
+	return formspec:sub(1, stop) .. ws47_theme.STYLE_PREFIX .. formspec:sub(stop + 1)
+end
 
 
 -- Path of the skin the player picked (falls back to the default skin).

@@ -489,14 +489,12 @@ end
 local function slots_formspec(tabview)
 	local W = tabview.width
 	local H = tabview.height
-	local gap = 0.35
-	local cols, rows = 3, 2
+	local gap = 0.3
+	local per_col = 3
 
-	-- squares: as big as fit
-	local side = math.min((H - 0.3 - 0.375 - (rows - 1) * gap) / rows,
-		(W - 0.75 - (cols - 1) * gap) / cols)
-	local total_w = cols * side + (cols - 1) * gap
-	local x_start = (W - total_w) / 2
+	-- 6 squares: 3 on the left, 3 on the right, the eye stays free in the middle
+	local side = (H - 0.3 - 0.375 - (per_col - 1) * gap) / per_col
+	local edge = 0.6
 	local y_start = 0.3
 
 	local fs = {
@@ -510,9 +508,9 @@ local function slots_formspec(tabview)
 	end
 
 	for i = 1, SLOT_COUNT do
-		local col = (i - 1) % cols
-		local row = math.floor((i - 1) / cols)
-		local x = x_start + col * (side + gap)
+		local col = math.floor((i - 1) / per_col)   -- 0 = left, 1 = right
+		local row = (i - 1) % per_col
+		local x = (col == 0) and edge or (W - edge - side)
 		local y = y_start + row * (side + gap)
 		local world = slot_world(i)
 
@@ -533,7 +531,7 @@ local function slots_formspec(tabview)
 			else
 				icon = tex("ws47_logo.png")
 			end
-			fs[#fs + 1] = ("style[slot_play_%d;bgimg=%s;bgimg_hovered=%s;bgimg_pressed=%s;border=false]")
+			fs[#fs + 1] = ("style[slot_play_%d;bgimg=%s;bgimg_hovered=%s;bgimg_pressed=%s;bgimg_middle=0;border=false]")
 				:format(i, icon, icon, icon)
 			fs[#fs + 1] = ("button[%f,%f;%f,%f;slot_play_%d;]"):format(
 				x + b, y + b, side - 2 * b, side - 2 * b, i)
@@ -543,7 +541,7 @@ local function slots_formspec(tabview)
 			fs[#fs + 1] = ("image_button[%f,%f;0.75,0.75;%s;slot_del_%d;]"):format(
 				x + side - 0.95, y + 0.2, tex("ws47_trash.png"), i)
 		else
-			fs[#fs + 1] = ("style[slot_new_%d;bgimg=%s;bgimg_hovered=%s;bgimg_pressed=%s;border=false]")
+			fs[#fs + 1] = ("style[slot_new_%d;bgimg=%s;bgimg_hovered=%s;bgimg_pressed=%s;bgimg_middle=0;border=false]")
 				:format(i, tex("ws47_slot_empty.png"), tex("ws47_slot_empty_hover.png"),
 					tex("ws47_slot_empty_pressed.png"))
 			fs[#fs + 1] = ("button[%f,%f;%f,%f;slot_new_%d;]"):format(

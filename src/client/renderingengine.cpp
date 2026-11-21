@@ -4,6 +4,8 @@
 // Copyright (C) 2017 nerzhul, Loic Blot <loic.blot@unix-experience.fr>
 
 #include <optional>
+#include <cmath>
+#include <algorithm>
 #include <irrlicht.h>
 #include "IMeshCache.h"
 #include "fontengine.h"
@@ -294,12 +296,125 @@ bool RenderingEngine::setWindowIcon()
 	Text will be removed when the screen is drawn the next time.
 	Additionally, a progressbar can be drawn when percent is set between 0 and 100.
 */
+// Workshop 47: purple night sky with an animated eye (shared by the loading
+// screen and the main menu). "prefix" is prepended to the texture names
+// (the main menu texture source needs absolute paths).
+void RenderingEngine::draw_ws47_scene(ISimpleTextureSource *tsrc, const std::string &prefix,
+		const v2u32 &screensize, float eye_cy, float eye_size)
+{
+	if (!tsrc || screensize.X == 0 || screensize.Y == 0)
+		return;
+
+	video::IVideoDriver *driver = get_video_driver();
+	const float PI_F = 3.14159265f;
+	const float t = (float) (porting::getTimeMs() % 3600000UL) / 1000.0f;
+
+	auto get = [&](const char *name) -> video::ITexture * {
+		return tsrc->getTexture(prefix + name);
+	};
+	auto blit = [&](video::ITexture *tex, const core::rect<s32> &dst,
+			const core::rect<s32> *clip, const video::SColor *colors) {
+		if (!tex)
+			return;
+		core::dimension2du ts = tex->getOriginalSize();
+		driver->draw2DImage(tex, dst, core::rect<s32>(0, 0, ts.Width, ts.Height),
+				clip, colors, true);
+	};
+
+	// --- sky (cover) + twinkling stars ---
+	const core::rect<s32> full(0, 0, screensize.X, screensize.Y);
+	video::ITexture *sky = get("ws47_sky.png");
+	if (sky) {
+		core::dimension2du ts = sky->getOriginalSize();
+		float sc = std::max((float) screensize.X / ts.Width,
+				(float) screensize.Y / ts.Height);
+		s32 sw = (s32) (screensize.X / sc);
+		s32 sh = (s32) (screensize.Y / sc);
+		s32 sx0 = ((s32) ts.Width - sw) / 2;
+		s32 sy0 = ((s32) ts.Height - sh) / 2;
+		core::rect<s32> src(sx0, sy0, sx0 + sw, sy0 + sh);
+		driver->draw2DImage(sky, full, src);
+
+		video::ITexture *tw = get("ws47_twinkle.png");
+		if (tw) {
+			u32 a = (u32) (115.0f + 105.0f * sinf(t * 1.7f));
+			video::SColor c(a, 255, 255, 255);
+			const video::SColor cols[4] = {c, c, c, c};
+			driver->draw2DImage(tw, full, src, nullptr, cols, true);
+		}
+	}
+
+	// --- eye geometry (canvas of the eye layers is 800x800) ---
+	const float S = screensize.Y * eye_size;
+	const float k = S / 800.0f;
+	const float cx = screensize.X * 0.5f;
+	const float cy = screensize.Y * eye_cy + screensize.Y * 0.008f * sinf(t * 0.8f);
+
+	// halo
+	{
+		video::ITexture *halo = get("ws47_halo.png");
+		float hs = S * 2.3f;
+		u32 a = (u32) (200.0f + 55.0f * sinf(t * 0.9f));
+		video::SColor c(a, 255, 255, 255);
+		const video::SColor cols[4] = {c, c, c, c};
+		core::rect<s32> hr((s32) (cx - hs / 2), (s32) (cy - hs / 2),
+				(s32) (cx + hs / 2), (s32) (cy + hs / 2));
+		if (halo)
+			driver->draw2DImage(halo, hr,
+					core::rect<s32>(0, 0, halo->getOriginalSize().Width,
+							halo->getOriginalSize().Height), nullptr, cols, true);
+	}
+
+	// model-unit -> canvas-pixel vectors of the render (see eye_info)
+	const float UX_X = -5.1922f, UX_Y = 0.0f;       // +1 model x
+	const float UY_X = 0.3643f, UY_Y = -5.5149f;    // +1 model y
+
+	// gaze (screen-right is -x in the model) and blinking
+	float gh = 11.0f * sinf(t * 0.61f) * cosf(t * 0.23f + 0.8f) + 3.0f * sinf(t * 1.7f);
+	gh = std::max(-13.0f, std::min(13.0f, gh));
+	float gv = 3.0f * sinf(t * 0.43f + 1.3f) + 1.2f * sinf(t * 1.1f);
+	float gx = -gh;
+
+	const float period = 4.7f;
+	float ph = fmodf(t, period);
+	long cycle = (long) (t / period);
+	float blink = 0.0f;
+	if (ph < 0.30f)
+		blink = sinf(ph / 0.30f * PI_F);
+	else if ((cycle % 3) == 2 && ph > 0.50f && ph < 0.75f)
+		blink = sinf((ph - 0.50f) / 0.25f * PI_F);
+
+	// half-open lids at rest ("calm" look), they close on a blink
+	float ct = 0.30f - 0.015f * gv + 0.36f * blink;  // part of the window covered from the top
+	float cb = 0.12f + 0.38f * blink;                // ... from the bottom
+	const float WIN_H = 47.0f;                       // eye window height in model units
+
+	auto layer_rect = [&](float dx_canvas, float dy_canvas) {
+		s32 x0 = (s32) (cx - S / 2 + dx_canvas * k);
+		s32 y0 = (s32) (cy - S / 2 + dy_canvas * k);
+		return core::rect<s32>(x0, y0, x0 + (s32) S, y0 + (s32) S);
+	};
+
+	core::rect<s32> clip(
+			(s32) (cx - S / 2 + 203 * k), (s32) (cy - S / 2 + 266 * k),
+			(s32) (cx - S / 2 + 589 * k), (s32) (cy - S / 2 + 530 * k));
+
+	blit(get("ws47_eye_back.png"), layer_rect(0, 0), nullptr, nullptr);
+	blit(get("ws47_eye_iris.png"),
+			layer_rect(gx * UX_X + gv * UY_X, gx * UX_Y + gv * UY_Y), &clip, nullptr);
+	blit(get("ws47_eye_lid_top.png"),
+			layer_rect((1.0f - ct) * WIN_H * UY_X, (1.0f - ct) * WIN_H * UY_Y), &clip, nullptr);
+	blit(get("ws47_eye_lid_bot.png"),
+			layer_rect(-(1.0f - cb) * WIN_H * UY_X, -(1.0f - cb) * WIN_H * UY_Y), &clip, nullptr);
+	blit(get("ws47_eye_front.png"), layer_rect(0, 0), nullptr, nullptr);
+}
+
 void RenderingEngine::draw_load_screen(const std::wstring &text,
   gui::IGUIEnvironment *guienv, ITextureSource *tsrc, float dtime,
   int percent, float *indef_pos)
 {
  v2u32 screensize = getWindowSize();
- v2s32 center(screensize.X / 2, (s32) (screensize.Y * 0.78f));
+ v2s32 center(screensize.X / 2, (s32) (screensize.Y * 0.84f));
  const video::SColor bg_color(255, 5, 5, 15);
  const video::SColor bar_bg_color(255, 40, 40, 60);
  const video::SColor bar_color(255, 127, 208, 255);
@@ -326,27 +441,8 @@ void RenderingEngine::draw_load_screen(const std::wstring &text,
  driver->setFog(bg_color);
  driver->beginScene(true, true, bg_color);
 
- // фонова картинка завантаження (cover: заповнює екран, обрізає краї)
- if (tsrc) {
-  video::ITexture *bg = tsrc->getTexture("ws47_loading.png");
-  if (bg) {
-   core::dimension2du ts = bg->getOriginalSize();
-   if (ts.Width > 0 && ts.Height > 0) {
-    float scale = std::max((float) screensize.X / ts.Width,
-      (float) screensize.Y / ts.Height);
-    s32 sw = (s32) (screensize.X / scale);
-    s32 sh = (s32) (screensize.Y / scale);
-    s32 sx0 = ((s32) ts.Width - sw) / 2;
-    s32 sy0 = ((s32) ts.Height - sh) / 2;
-    driver->draw2DImage(bg,
-     core::rect<s32>(0, 0, screensize.X, screensize.Y),
-     core::rect<s32>(sx0, sy0, sx0 + sw, sy0 + sh));
-    // легке затемнення, щоб текст і смужка читались
-    driver->draw2DRectangle(video::SColor(45, 0, 0, 0),
-     core::rect<s32>(0, 0, screensize.X, screensize.Y));
-   }
-  }
- }
+ // Workshop 47: нічне небо + живе око
+ draw_ws47_scene(tsrc, "", screensize, 0.40f, 0.62f);
 
  int percent_min = 0;
  int percent_max = percent;

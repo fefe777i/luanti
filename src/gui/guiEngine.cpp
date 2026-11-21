@@ -370,7 +370,13 @@ void GUIEngine::run()
 			driver->setFog(m_rendering_engine->m_menu_sky_color);
 			driver->beginScene(true, true, m_rendering_engine->m_menu_sky_color);
 
-			if (m_clouds_enabled) {
+			if (!g_settings->getBool("ws47_classic_menu")) {
+				// Workshop 47: night sky + animated eye
+				static const std::string ws47_prefix = porting::path_share + DIR_DELIM
+					"textures" DIR_DELIM "base" DIR_DELIM "pack" DIR_DELIM;
+				RenderingEngine::draw_ws47_scene(m_texture_source.get(), ws47_prefix,
+					driver->getScreenSize(), 0.46f, 0.60f);
+			} else if (m_clouds_enabled) {
 				drawClouds(dtime);
 				drawOverlay(driver);
 			} else {

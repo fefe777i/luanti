@@ -27,6 +27,7 @@ struct VideoDriverInfo {
 };
 
 class ITextureSource;
+class ISimpleTextureSource;
 class Client;
 class Hud;
 
@@ -128,6 +129,10 @@ public:
 	void draw_load_screen(const std::wstring &text,
 			gui::IGUIEnvironment *guienv, ITextureSource *tsrc,
 			float dtime = 0, int percent = 0, float *indef_pos = nullptr);
+
+	// Workshop 47: night sky + animated eye (loading screen and main menu)
+	static void draw_ws47_scene(ISimpleTextureSource *tsrc, const std::string &prefix,
+			const v2u32 &screensize, float eye_cy, float eye_size);
 
 	void draw_scene(video::SColor skycolor, bool show_hud,
 			bool draw_wield_tool, bool draw_crosshair);

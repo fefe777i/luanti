@@ -27,8 +27,9 @@ function mm_game_theme.apply_ws47_background()
 	if classic then
 		return
 	end
+	-- the engine draws the night sky + animated eye itself (guiEngine.cpp)
 	core.set_background("overlay", "")
-	core.set_background("background", defaulttexturedir .. "ws47_loading.png")
+	core.set_background("background", "")
 	core.set_clouds(false)
 end
 
