@@ -11,6 +11,10 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
+      - name: Download Minetest Game
+        run: |
+          git clone --depth 1 https://github.com/luanti-org/minetest_game.git games/minetest_game
+          rm -rf games/minetest_game/.git
       - name: Apply Multiworld
         run: bash apply_multiworld.sh
       - name: Install deps

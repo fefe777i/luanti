@@ -459,6 +459,7 @@ end
 --------------------------------------------------------------------------------
 -- Slot menu: 6 world slots (tap an empty slot = create a world and start it,
 -- tap a filled slot = play it, trash button = delete it).
+-- Slots are plain neon squares: a plus when empty, the game icon when filled.
 -- The old menu comes back with Settings -> Advanced -> "Classic singleplayer menu".
 --------------------------------------------------------------------------------
 local SLOT_COUNT = 6
@@ -488,56 +489,64 @@ end
 local function slots_formspec(tabview)
 	local W = tabview.width
 	local H = tabview.height
-	local margin = 0.375
-	local gap = 0.3
+	local gap = 0.35
 	local cols, rows = 3, 2
-	local sw = (W - 2 * margin - (cols - 1) * gap) / cols
-	local sh = (H - 0.3 - 0.375 - (rows - 1) * gap) / rows
+
+	-- squares: as big as fit
+	local side = math.min((H - 0.3 - 0.375 - (rows - 1) * gap) / rows,
+		(W - 0.75 - (cols - 1) * gap) / cols)
+	local total_w = cols * side + (cols - 1) * gap
+	local x_start = (W - total_w) / 2
+	local y_start = 0.3
 
 	local fs = {
 		ws47_theme.STYLE_PREFIX,
 		"box[0,0;", W, ",", H, ";", ws47_theme.COLOR_BG, "]",
-		"style_type[button;font_size=*1.3]",
 	}
 
-	local trash = core.formspec_escape(defaulttexturedir .. "ws47_trash.png")
+	local tex = function(name)
+		return core.formspec_escape(defaulttexturedir .. name)
+	end
 
 	for i = 1, SLOT_COUNT do
 		local col = (i - 1) % cols
 		local row = math.floor((i - 1) / cols)
-		local x = margin + col * (sw + gap)
-		local y = 0.3 + row * (sh + gap)
+		local x = x_start + col * (side + gap)
+		local y = y_start + row * (side + gap)
 		local world = slot_world(i)
 
-		fs[#fs + 1] = "box[" .. x .. "," .. y .. ";" .. sw .. "," .. sh .. ";" ..
-			ws47_theme.COLOR_BG_2 .. "]"
+		-- neon frame: blue for a world, pink for an empty slot
+		local frame = world and ws47_theme.COLOR_BLUE or ws47_theme.COLOR_PINK
+		local glow = frame:sub(1, 7) .. "3a"
+		local b = 0.07 -- frame thickness
+
+		fs[#fs + 1] = ("box[%f,%f;%f,%f;%s]"):format(x - 0.1, y - 0.1, side + 0.2, side + 0.2, glow)
+		fs[#fs + 1] = ("box[%f,%f;%f,%f;%s]"):format(x, y, side, side, frame)
+		fs[#fs + 1] = ("box[%f,%f;%f,%f;#0a0620]"):format(x + b, y + b, side - 2 * b, side - 2 * b)
 
 		if world then
 			local game = pkgmgr.find_by_gameid(world.gameid)
-			local title = core.formspec_escape(fgettext("Slot $1", i))
-			local sub = core.formspec_escape(world.name ..
-				(game and (" · " .. game.title) or ""))
-			fs[#fs + 1] = "label[" .. (x + 0.3) .. "," .. (y + 0.4) .. ";" ..
-				core.colorize("#ffffff", title) .. "]"
-			fs[#fs + 1] = "label[" .. (x + 0.3) .. "," .. (y + 0.8) .. ";" ..
-				sub .. "]"
-			fs[#fs + 1] = "style[slot_play_" .. i .. ";bgcolor=#3a1a70]"
-			fs[#fs + 1] = "button[" .. (x + 0.2) .. "," .. (y + 1.15) .. ";" ..
-				(sw - 0.4) .. "," .. (sh - 1.35) .. ";slot_play_" .. i .. ";" ..
-				fgettext("Play Game") .. "]"
-			fs[#fs + 1] = "style[slot_del_" .. i .. ";bgcolor=#7a1530;bgcolor_hovered=#ff3c5c]"
-			fs[#fs + 1] = "image_button[" .. (x + sw - 0.95) .. "," .. (y + 0.2) ..
-				";0.75,0.75;" .. trash .. ";slot_del_" .. i .. ";]"
-			fs[#fs + 1] = "tooltip[slot_del_" .. i .. ";" ..
-				core.formspec_escape(fgettext("Delete world")) .. "]"
+			local icon
+			if game and (game.menuicon_path or "") ~= "" then
+				icon = core.formspec_escape(game.menuicon_path)
+			else
+				icon = tex("ws47_logo.png")
+			end
+			fs[#fs + 1] = ("style[slot_play_%d;bgimg=%s;bgimg_hovered=%s;bgimg_pressed=%s;border=false]")
+				:format(i, icon, icon, icon)
+			fs[#fs + 1] = ("button[%f,%f;%f,%f;slot_play_%d;]"):format(
+				x + b, y + b, side - 2 * b, side - 2 * b, i)
+
+			-- trash button in the corner (drawn after the slot button, so it is on top)
+			fs[#fs + 1] = ("style[slot_del_%d;bgcolor=#7a1530;bgcolor_hovered=#ff3c5c;bgcolor_pressed=#ff3c5c]"):format(i)
+			fs[#fs + 1] = ("image_button[%f,%f;0.75,0.75;%s;slot_del_%d;]"):format(
+				x + side - 0.95, y + 0.2, tex("ws47_trash.png"), i)
 		else
-			fs[#fs + 1] = "label[" .. (x + 0.3) .. "," .. (y + 0.4) .. ";" ..
-				core.formspec_escape(fgettext("Slot $1", i)) .. "]"
-			fs[#fs + 1] = "label[" .. (x + 0.3) .. "," .. (y + 0.8) .. ";" ..
-				core.formspec_escape(fgettext("Empty slot")) .. "]"
-			fs[#fs + 1] = "button[" .. (x + 0.2) .. "," .. (y + 1.15) .. ";" ..
-				(sw - 0.4) .. "," .. (sh - 1.35) .. ";slot_new_" .. i .. ";+ " ..
-				core.formspec_escape(fgettext("New world")) .. "]"
+			fs[#fs + 1] = ("style[slot_new_%d;bgimg=%s;bgimg_hovered=%s;bgimg_pressed=%s;border=false]")
+				:format(i, tex("ws47_slot_empty.png"), tex("ws47_slot_empty_hover.png"),
+					tex("ws47_slot_empty_pressed.png"))
+			fs[#fs + 1] = ("button[%f,%f;%f,%f;slot_new_%d;]"):format(
+				x + b, y + b, side - 2 * b, side - 2 * b, i)
 		end
 	end
 

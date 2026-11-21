@@ -92,6 +92,11 @@ task prepareAssets() {
 			from "${projRoot}/textures/base/pack" into "${assetsFolder}/textures/base/pack"
 		}
 
+		// Minetest Game is downloaded by CI into games/minetest_game
+		copy {
+			from "${projRoot}/games/minetest_game" into "${assetsFolder}/games/minetest_game"
+		}
+
 		// compile translations
 		fileTree("${projRoot}/po").include("**/*.po").grep {
 			it.parentFile.name !in unsupportedLanguages

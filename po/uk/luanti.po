@@ -8130,17 +8130,5 @@ msgstr "Сховати інтерфейс"
 msgid "Double-tap to show interface"
 msgstr "Подвійний тап, щоб показати інтерфейс"
 
-msgid "Slot $1"
-msgstr "Слот $1"
-
-msgid "Empty slot"
-msgstr "Порожній слот"
-
-msgid "New world"
-msgstr "Новий світ"
-
-msgid "Delete world"
-msgstr "Видалити світ"
-
 msgid "Classic singleplayer menu"
 msgstr "Класичне меню одиночної гри"

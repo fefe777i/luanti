@@ -8060,3 +8060,6 @@ msgstr "Не удалось сохранить снимок экрана в \"%s
 #~ "game:<имя>\n"
 #~ "mod:<имя>\n"
 #~ "player:<имя>"
+
+msgid "Classic singleplayer menu"
+msgstr "Классическое меню одиночной игры"

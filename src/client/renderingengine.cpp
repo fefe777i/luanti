@@ -326,6 +326,28 @@ void RenderingEngine::draw_load_screen(const std::wstring &text,
  driver->setFog(bg_color);
  driver->beginScene(true, true, bg_color);
 
+ // фонова картинка завантаження (cover: заповнює екран, обрізає краї)
+ if (tsrc) {
+  video::ITexture *bg = tsrc->getTexture("ws47_loading.png");
+  if (bg) {
+   core::dimension2du ts = bg->getOriginalSize();
+   if (ts.Width > 0 && ts.Height > 0) {
+    float scale = std::max((float) screensize.X / ts.Width,
+      (float) screensize.Y / ts.Height);
+    s32 sw = (s32) (screensize.X / scale);
+    s32 sh = (s32) (screensize.Y / scale);
+    s32 sx0 = ((s32) ts.Width - sw) / 2;
+    s32 sy0 = ((s32) ts.Height - sh) / 2;
+    driver->draw2DImage(bg,
+     core::rect<s32>(0, 0, screensize.X, screensize.Y),
+     core::rect<s32>(sx0, sy0, sx0 + sw, sy0 + sh));
+    // легке затемнення, щоб текст і смужка читались
+    driver->draw2DRectangle(video::SColor(100, 0, 0, 0),
+     core::rect<s32>(0, 0, screensize.X, screensize.Y));
+   }
+  }
+ }
+
  int percent_min = 0;
  int percent_max = percent;
  if (indef_pos) {
