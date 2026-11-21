@@ -1978,6 +1978,10 @@ mgvalleys_np_dungeons (Dungeon noise) noise_params_3d 0.9, 0.5, (500, 500, 500),
 
 [*Developer Options]
 
+#    Use the classic singleplayer menu (world list with Play/New/Delete)
+#    instead of the 6 world slots.
+ws47_classic_menu (Classic singleplayer menu) [client] bool false
+
 #    Enable Lua modding support on client.
 #    This support is experimental and API can change.
 enable_client_modding (Client modding) [client] bool false

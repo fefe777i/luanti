@@ -145,7 +145,7 @@ local function get_disabled_settings(game)
 	return disabled_settings
 end
 
-local function get_formspec(tabview, name, tabdata)
+local function classic_get_formspec(tabview, name, tabdata)
 
 	-- Point the player to ContentDB when no games are found
 	if #pkgmgr.games == 0 then
@@ -280,7 +280,7 @@ local function get_formspec(tabview, name, tabdata)
 	return retval
 end
 
-local function main_button_handler(this, fields, name, tabdata)
+local function classic_button_handler(this, fields, name, tabdata)
 
 	assert(name == "local")
 
@@ -456,6 +456,222 @@ local function main_button_handler(this, fields, name, tabdata)
 	end
 end
 
+--------------------------------------------------------------------------------
+-- Slot menu: 6 world slots (tap an empty slot = create a world and start it,
+-- tap a filled slot = play it, trash button = delete it).
+-- The old menu comes back with Settings -> Advanced -> "Classic singleplayer menu".
+--------------------------------------------------------------------------------
+local SLOT_COUNT = 6
+
+local function use_classic_menu()
+	return core.settings:get_bool("ws47_classic_menu")
+end
+
+local function slot_key(i)
+	return "ws47_slot_" .. i
+end
+
+-- Returns the raw world list element stored in slot i (or nil if empty)
+local function slot_world(i)
+	local name = core.settings:get(slot_key(i))
+	if not name or name == "" then
+		return nil
+	end
+	for _, world in ipairs(menudata.worldlist:get_raw_list()) do
+		if world.name == name then
+			return world
+		end
+	end
+	return nil
+end
+
+local function slots_formspec(tabview)
+	local W = tabview.width
+	local H = tabview.height
+	local margin = 0.375
+	local gap = 0.3
+	local cols, rows = 3, 2
+	local sw = (W - 2 * margin - (cols - 1) * gap) / cols
+	local sh = (H - 0.3 - 0.375 - (rows - 1) * gap) / rows
+
+	local fs = {
+		ws47_theme.STYLE_PREFIX,
+		"box[0,0;", W, ",", H, ";", ws47_theme.COLOR_BG, "]",
+		"style_type[button;font_size=*1.3]",
+	}
+
+	local trash = core.formspec_escape(defaulttexturedir .. "ws47_trash.png")
+
+	for i = 1, SLOT_COUNT do
+		local col = (i - 1) % cols
+		local row = math.floor((i - 1) / cols)
+		local x = margin + col * (sw + gap)
+		local y = 0.3 + row * (sh + gap)
+		local world = slot_world(i)
+
+		fs[#fs + 1] = "box[" .. x .. "," .. y .. ";" .. sw .. "," .. sh .. ";" ..
+			ws47_theme.COLOR_BG_2 .. "]"
+
+		if world then
+			local game = pkgmgr.find_by_gameid(world.gameid)
+			local title = core.formspec_escape(fgettext("Slot $1", i))
+			local sub = core.formspec_escape(world.name ..
+				(game and (" · " .. game.title) or ""))
+			fs[#fs + 1] = "label[" .. (x + 0.3) .. "," .. (y + 0.4) .. ";" ..
+				core.colorize("#ffffff", title) .. "]"
+			fs[#fs + 1] = "label[" .. (x + 0.3) .. "," .. (y + 0.8) .. ";" ..
+				sub .. "]"
+			fs[#fs + 1] = "style[slot_play_" .. i .. ";bgcolor=#3a1a70]"
+			fs[#fs + 1] = "button[" .. (x + 0.2) .. "," .. (y + 1.15) .. ";" ..
+				(sw - 0.4) .. "," .. (sh - 1.35) .. ";slot_play_" .. i .. ";" ..
+				fgettext("Play Game") .. "]"
+			fs[#fs + 1] = "style[slot_del_" .. i .. ";bgcolor=#7a1530;bgcolor_hovered=#ff3c5c]"
+			fs[#fs + 1] = "image_button[" .. (x + sw - 0.95) .. "," .. (y + 0.2) ..
+				";0.75,0.75;" .. trash .. ";slot_del_" .. i .. ";]"
+			fs[#fs + 1] = "tooltip[slot_del_" .. i .. ";" ..
+				core.formspec_escape(fgettext("Delete world")) .. "]"
+		else
+			fs[#fs + 1] = "label[" .. (x + 0.3) .. "," .. (y + 0.4) .. ";" ..
+				core.formspec_escape(fgettext("Slot $1", i)) .. "]"
+			fs[#fs + 1] = "label[" .. (x + 0.3) .. "," .. (y + 0.8) .. ";" ..
+				core.formspec_escape(fgettext("Empty slot")) .. "]"
+			fs[#fs + 1] = "button[" .. (x + 0.2) .. "," .. (y + 1.15) .. ";" ..
+				(sw - 0.4) .. "," .. (sh - 1.35) .. ";slot_new_" .. i .. ";+ " ..
+				core.formspec_escape(fgettext("New world")) .. "]"
+		end
+	end
+
+	return table.concat(fs)
+end
+
+-- Start the world with the given name in singleplayer mode
+local function start_world(world_name)
+	local raw_index = menudata.worldlist:raw_index_by_uid(world_name)
+	if not raw_index or raw_index == 0 then
+		return false
+	end
+	local world = menudata.worldlist:get_raw_element(raw_index)
+	if not world then
+		return false
+	end
+
+	local game_obj = pkgmgr.find_by_gameid(world.gameid)
+	if game_obj then
+		core.settings:set("menu_last_game", game_obj.id)
+		menudata.worldlist:set_filtercriteria(game_obj.id)
+	end
+
+	-- Load creative/damage etc. of this world into the settings
+	local list_index = filterlist.get_current_index(menudata.worldlist, raw_index)
+	if list_index and list_index > 0 then
+		menu_worldmt_legacy(list_index)
+	end
+
+	local disabled_settings = get_disabled_settings(game_obj)
+	for k, _ in pairs(valid_disabled_settings) do
+		local v = disabled_settings[k]
+		if v ~= nil then
+			if k == "enable_server" and v == true then
+				error("Setting 'enable_server' cannot be force-enabled! The game.conf needs to be fixed.")
+			end
+			core.settings:set_bool(k, v)
+		end
+	end
+
+	core.settings:set("mainmenu_last_selected_world", raw_index)
+	gamedata.selected_world = raw_index
+	gamedata.mode = "singleplayer"
+	core.start()
+	return true
+end
+
+-- Create a new world in slot i with default settings and start it
+local function create_slot_world(slot)
+	local game = current_game()
+	if not game then
+		return false
+	end
+
+	-- unique world name
+	local worldname = "world_slot" .. slot
+	local n = 1
+	while menudata.worldlist:uid_exists_raw(worldname) do
+		n = n + 1
+		worldname = "world_slot" .. slot .. "_" .. n
+	end
+
+	local settings = {
+		fixed_map_seed = core.settings:get("fixed_map_seed") or "",
+	}
+	local gameconfig = Settings(game.path .. "/game.conf")
+	local mg = gameconfig and gameconfig:get("default_mapgen") or core.settings:get("mg_name")
+	if mg and table.indexof(core.get_mapgen_names(), mg) > 0 then
+		settings.mg_name = mg
+	end
+
+	local message = core.create_world(worldname, game.id, settings)
+	if message ~= nil then
+		gamedata.errormessage = message
+		return true
+	end
+
+	core.settings:set("menu_last_game", game.id)
+	menudata.worldlist:set_filtercriteria(game.id)
+	menudata.worldlist:refresh()
+	core.settings:set(slot_key(slot), worldname)
+
+	start_world(worldname)
+	return true
+end
+
+local function slots_button_handler(this, fields)
+	for i = 1, SLOT_COUNT do
+		if fields["slot_new_" .. i] then
+			return create_slot_world(i)
+		end
+
+		if fields["slot_play_" .. i] then
+			local world = slot_world(i)
+			if world then
+				start_world(world.name)
+			end
+			return true
+		end
+
+		if fields["slot_del_" .. i] then
+			local world = slot_world(i)
+			if world then
+				local raw_index = menudata.worldlist:raw_index_by_uid(world.name)
+				if raw_index and raw_index > 0 then
+					local dlg = create_delete_world_dlg(world.name, raw_index)
+					dlg:set_parent(this)
+					this:hide()
+					dlg:show()
+				end
+			end
+			return true
+		end
+	end
+	return false
+end
+
+local function get_formspec(tabview, name, tabdata)
+	if #pkgmgr.games > 0 and not use_classic_menu() then
+		return slots_formspec(tabview)
+	end
+	return classic_get_formspec(tabview, name, tabdata)
+end
+
+local function main_button_handler(this, fields, name, tabdata)
+	if #pkgmgr.games > 0 and not use_classic_menu() then
+		if fields.key_enter then
+			return true
+		end
+		return slots_button_handler(this, fields)
+	end
+	return classic_button_handler(this, fields, name, tabdata)
+end
+
 local function on_change(type)
 	if type == "ENTER" then
 		local game = current_game()
@@ -466,8 +682,16 @@ local function on_change(type)
 		end
 		mm_game_theme.clear_single("header")
 
-		if singleplayer_refresh_gamebar() then
-			ui.find_by_name("game_button_bar"):show()
+		if use_classic_menu() then
+			if singleplayer_refresh_gamebar() then
+				ui.find_by_name("game_button_bar"):show()
+			end
+		else
+			-- slot menu has no game bar
+			local old_bar = ui.find_by_name("game_button_bar")
+			if old_bar ~= nil then
+				old_bar:delete()
+			end
 		end
 	elseif type == "LEAVE" then
 		menudata.worldlist:set_filtercriteria(nil)

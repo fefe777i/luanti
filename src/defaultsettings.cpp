@@ -399,6 +399,7 @@ void set_default_settings()
 	settings->setDefault("toggle_aux1_key", "false");
 	settings->setDefault("autojump", bool_to_cstr(has_touch));
 	settings->setDefault("enable_esc_dialog", "true");
+	settings->setDefault("ws47_classic_menu", "false");
 	settings->setDefault("continuous_forward", "false");
 	settings->setDefault("repeat_joystick_button_time", "0.17");
 	settings->setDefault("joystick_frustum_sensitivity", "170");
