@@ -19,6 +19,20 @@ function mm_game_theme.init()
 end
 
 --------------------------------------------------------------------------------
+-- Workshop 47: purple night sky with the eye as the menu background
+-- (not used with the classic singleplayer menu)
+function mm_game_theme.apply_ws47_background()
+	local classic = core.settings:get_bool("ws47_classic_menu")
+	mm_game_theme.ws47_classic_state = classic
+	if classic then
+		return
+	end
+	core.set_background("overlay", "")
+	core.set_background("background", defaulttexturedir .. "ws47_loading.png")
+	core.set_clouds(false)
+end
+
+--------------------------------------------------------------------------------
 function mm_game_theme.set_engine(hide_decorations)
 	mm_game_theme.gameid = nil
 	mm_game_theme.stop_music()
@@ -52,6 +66,8 @@ function mm_game_theme.set_engine(hide_decorations)
 	if not have_bg then
 		core.set_clouds(core.settings:get_bool("menu_clouds"))
 	end
+
+	mm_game_theme.apply_ws47_background()
 end
 
 --------------------------------------------------------------------------------
@@ -91,6 +107,8 @@ function mm_game_theme.set_game(gamedetails)
 	if not have_bg then
 		core.set_clouds(core.settings:get_bool("menu_clouds"))
 	end
+
+	mm_game_theme.apply_ws47_background()
 end
 
 --------------------------------------------------------------------------------

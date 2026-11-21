@@ -299,7 +299,7 @@ void RenderingEngine::draw_load_screen(const std::wstring &text,
   int percent, float *indef_pos)
 {
  v2u32 screensize = getWindowSize();
- v2s32 center(screensize.X / 2, screensize.Y / 2);
+ v2s32 center(screensize.X / 2, (s32) (screensize.Y * 0.78f));
  const video::SColor bg_color(255, 5, 5, 15);
  const video::SColor bar_bg_color(255, 40, 40, 60);
  const video::SColor bar_color(255, 127, 208, 255);
@@ -342,7 +342,7 @@ void RenderingEngine::draw_load_screen(const std::wstring &text,
      core::rect<s32>(0, 0, screensize.X, screensize.Y),
      core::rect<s32>(sx0, sy0, sx0 + sw, sy0 + sh));
     // легке затемнення, щоб текст і смужка читались
-    driver->draw2DRectangle(video::SColor(100, 0, 0, 0),
+    driver->draw2DRectangle(video::SColor(45, 0, 0, 0),
      core::rect<s32>(0, 0, screensize.X, screensize.Y));
    }
   }

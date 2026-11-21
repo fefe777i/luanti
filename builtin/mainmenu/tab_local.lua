@@ -501,7 +501,8 @@ local function slots_formspec(tabview)
 
 	local fs = {
 		ws47_theme.STYLE_PREFIX,
-		"box[0,0;", W, ",", H, ";", ws47_theme.COLOR_BG, "]",
+		-- light tint only: the night sky behind the menu stays visible
+		"box[0,0;", W, ",", H, ";#14092e40]",
 	}
 
 	local tex = function(name)
@@ -522,7 +523,7 @@ local function slots_formspec(tabview)
 
 		fs[#fs + 1] = ("box[%f,%f;%f,%f;%s]"):format(x - 0.1, y - 0.1, side + 0.2, side + 0.2, glow)
 		fs[#fs + 1] = ("box[%f,%f;%f,%f;%s]"):format(x, y, side, side, frame)
-		fs[#fs + 1] = ("box[%f,%f;%f,%f;#0a0620]"):format(x + b, y + b, side - 2 * b, side - 2 * b)
+		fs[#fs + 1] = ("box[%f,%f;%f,%f;#0a0620b0]"):format(x + b, y + b, side - 2 * b, side - 2 * b)
 
 		if world then
 			local game = pkgmgr.find_by_gameid(world.gameid)
@@ -684,6 +685,10 @@ end
 local function on_change(type)
 	if type == "ENTER" then
 		local game = current_game()
+		if mm_game_theme.ws47_classic_state ~= use_classic_menu() then
+			-- menu style was switched in the settings: force the theme to reload
+			mm_game_theme.gameid = nil
+		end
 		if game then
 			apply_game(game)
 		else
